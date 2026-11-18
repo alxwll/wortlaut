@@ -544,7 +544,7 @@
   }
   function prefetch(book, ch) {
     let next = ch;
-    for (let k = 0; k < 2 && next.to < book.sentences.length; k++) {
+    for (let k = 0; k < 1 && next.to < book.sentences.length; k++) {
       next = makeChunk(book, next.to);
       fetchChunk(next).catch(() => {});
     }
@@ -571,7 +571,6 @@
       audio.volume = volumeFor();
       await audio.play();
       setLoading(false);
-      prefetch(book, ch);
       setupMediaSession();
     } catch (e) {
       if (P.chunk !== ch) return;
@@ -581,6 +580,21 @@
       updatePlayerUi();
       toast(e.message);
     }
+  }
+  // Satz vor/zurück: liegt der Satz im schon geladenen Abschnitt, nur spulen statt neu anfragen
+  function jumpTo(idx) {
+    const ch = P.chunk;
+    if (P.engine === 'cloud' && ch && idx >= ch.from && idx < ch.to && audio.duration && isFinite(audio.duration)) {
+      let acc = 0;
+      for (let k = 0; k < idx - ch.from; k++) acc += ch.lens[k];
+      audio.currentTime = (acc / ch.chars) * audio.duration + 0.05;
+      P.idx = idx;
+      state.progress.pos = idx;
+      if (!P.playing) { P.playing = true; P.lastTick = Date.now(); audio.play().catch(() => {}); }
+      updatePlayerUi();
+      return;
+    }
+    return playFrom(idx);
   }
   function stopAudio() {
     audio.pause();
@@ -598,6 +612,8 @@
     let acc = 0, k = 0;
     while (k < ch.lens.length - 1 && acc + ch.lens[k] < target) { acc += ch.lens[k]; k++; }
     const idx = ch.from + k;
+    // Nächsten Abschnitt erst vorladen, wenn der aktuelle zur Hälfte gehört ist (spart Kontingent beim Reinhören)
+    if (frac > 0.5 && !ch.prefetched && P.playing) { ch.prefetched = true; prefetch(state.book, ch); }
     if (idx !== P.idx) onSentence(idx);
   });
   audio.addEventListener('ended', () => {
@@ -757,10 +773,10 @@
       navigator.mediaSession.metadata = new MediaMetadata({ title: book.title, artist: book.author, album: 'Wort. Laut.', artwork: art });
       navigator.mediaSession.setActionHandler('play', () => resume());
       navigator.mediaSession.setActionHandler('pause', () => pause());
-      navigator.mediaSession.setActionHandler('previoustrack', () => playFrom(P.idx - 1));
-      navigator.mediaSession.setActionHandler('nexttrack', () => playFrom(P.idx + 1));
-      navigator.mediaSession.setActionHandler('seekbackward', () => playFrom(P.idx - 1));
-      navigator.mediaSession.setActionHandler('seekforward', () => playFrom(P.idx + 1));
+      navigator.mediaSession.setActionHandler('previoustrack', () => jumpTo(P.idx - 1));
+      navigator.mediaSession.setActionHandler('nexttrack', () => jumpTo(P.idx + 1));
+      navigator.mediaSession.setActionHandler('seekbackward', () => jumpTo(P.idx - 1));
+      navigator.mediaSession.setActionHandler('seekforward', () => jumpTo(P.idx + 1));
       navigator.mediaSession.playbackState = 'playing';
     } catch (e) { /* nicht überall verfügbar */ }
   }
@@ -986,6 +1002,46 @@
     toast('Gespeichert');
     render();
   }
+  // Kontingent als Sonnenbogen: links aufgegangen = verbraucht, Rest = übrig
+  const fmtHM = (chars) => {
+    const m = Math.max(0, Math.round(chars / 1000)); // 1.000 Zeichen ≈ 1 Minute
+    return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min` : `${m} min`;
+  };
+  function resetDate() {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth() + 1, 1).toLocaleDateString('de-DE', { day: 'numeric', month: 'long' });
+  }
+  function quotaGauge(limit, parts) {
+    // parts: [{ chars, color, label }]
+    const pt = (f) => {
+      const a = Math.PI * Math.min(1, Math.max(0, f));
+      return [(120 - 100 * Math.cos(a)).toFixed(1), (124 - 100 * Math.sin(a)).toFixed(1)];
+    };
+    const used = parts.reduce((n, p) => n + p.chars, 0);
+    let f0 = 0, arcs = '';
+    for (const p of parts) {
+      const f1 = Math.min(1, f0 + p.chars / limit);
+      if (f1 > f0 + 0.002) {
+        const [x0, y0] = pt(f0), [x1, y1] = pt(f1);
+        arcs += `<path d="M${x0} ${y0} A100 100 0 0 1 ${x1} ${y1}" fill="none" stroke="${p.color}" stroke-width="10" stroke-linecap="round"/>`;
+      }
+      f0 = f1;
+    }
+    const [sx, sy] = pt(f0);
+    const left = Math.max(0, limit - used);
+    return `<div class="sun-wrap" style="max-width:280px">
+        <svg viewBox="0 0 240 132" role="img" aria-label="${fmtHM(used)} verbraucht, ${fmtHM(left)} übrig">
+          <path d="M20 124 A100 100 0 0 1 220 124" fill="none" stroke="var(--line)" stroke-width="10" stroke-linecap="round"/>
+          ${arcs}
+          <circle cx="${sx}" cy="${sy}" r="14" fill="var(--accent)" opacity=".18"/><circle cx="${sx}" cy="${sy}" r="7" fill="var(--accent)"/>
+        </svg>
+        <span class="sun-time" style="bottom:4%;font-size:30px">${fmtHM(left)}</span>
+      </div>
+      <span class="muted" style="text-align:center">übrig von ${fmtHM(limit)} · neu am ${resetDate()}</span>
+      <div class="col" style="gap:4px;margin-top:4px">${parts.map((p) => `<span class="row small" style="gap:8px"><span style="width:10px;height:10px;border-radius:5px;background:${p.color};flex-shrink:0"></span>${esc(p.label)}: ${fmtHM(p.chars)}</span>`).join('')}</div>`;
+  }
+  const FREE_CHARS = 500000; // Azure-Gratis-Kontingent pro Monat
+
   async function loadMe() {
     const box = $('#me');
     if (!box || !workerUrl() || !S.code) return;
@@ -994,10 +1050,21 @@
       state.me = me;
       const limit = me.limitChars;
       const pct = limit ? Math.min(100, Math.round((me.usedChars / limit) * 100)) : null;
+      let gauge = '';
+      if (me.admin) {
+        // Admin sieht das gemeinsame Azure-Kontingent: eigener Verbrauch + alle Eingeladenen
+        let others = 0;
+        try { const d = await api('/admin/codes'); others = d.codes.reduce((n, c) => n + c.usedChars, 0); } catch (e) {}
+        gauge = quotaGauge(FREE_CHARS, [
+          { chars: me.usedChars, color: 'var(--accent)', label: 'Du' },
+          ...(others ? [{ chars: others, color: '#8DA2B5', label: 'Eingeladene' }] : []),
+        ]);
+      } else if (limit) {
+        gauge = quotaGauge(limit, [{ chars: me.usedChars, color: 'var(--accent)', label: 'Verbraucht' }]);
+      }
       box.innerHTML = `<span style="font-weight:600">${esc(me.name)}${me.paused ? ' · pausiert' : ''}</span>
-        ${limit ? `<div class="meter" role="img" aria-label="${pct} Prozent verbraucht"><div style="width:${pct}%"></div></div>
-        <span class="muted">${fmtHours(me.usedChars)} von ${fmtHours(limit)} diesen Monat gehört</span>`
-        : `<span class="muted">Diesen Monat ${fmtHours(me.usedChars)} gehört · ohne Limit</span>`}
+        ${gauge || `<span class="muted">Diesen Monat ${fmtHM(me.usedChars)} verbraucht</span>`}
+        <span class="small">Gezählt wird alles, was bei Azure angefragt wurde – auch vorgeladene Abschnitte und Probehören.</span>
         ${S.ownKey ? '<span class="small">Gerade aktiv: dein eigener Azure-Schlüssel.</span>' : ''}`;
       if (me.admin) $('#adminlink').innerHTML = `<a class="list-btn" href="#/admin" style="text-decoration:none;color:inherit"><span class="col" style="gap:2px"><span style="font-weight:600">Zugänge verwalten</span><span class="small">Personen einladen, Kontingente festlegen</span></span>${I.chev}</a>`;
     } catch (e) {
@@ -1082,10 +1149,12 @@
       const d = await api('/admin/codes');
       const totalLimit = d.codes.reduce((n, c) => n + c.limitChars, 0);
       const totalUsed = d.codes.reduce((n, c) => n + c.usedChars, 0) + d.adminUsedChars;
-      box.innerHTML = `<div class="card"><span class="label">Diesen Monat</span>
-          <div class="meter"><div style="width:${Math.min(100, Math.round((totalUsed / 500000) * 100))}%"></div></div>
-          <span class="muted">${fmtHours(totalUsed)} von ca. 8,3 h Gratis-Kontingent verbraucht · du selbst: ${fmtHours(d.adminUsedChars)}</span>
-          <span class="small">Vergeben an andere: ${fmtHours(totalLimit)} pro Monat</span></div>` +
+      box.innerHTML = `<div class="card" style="align-items:stretch"><span class="label">Gratis-Kontingent diesen Monat</span>
+          ${quotaGauge(FREE_CHARS, [
+            { chars: d.adminUsedChars, color: 'var(--accent)', label: 'Du' },
+            { chars: totalUsed - d.adminUsedChars, color: '#8DA2B5', label: 'Eingeladene' },
+          ])}
+          <span class="small">Zugesagt an andere: bis zu ${fmtHM(totalLimit)} pro Monat</span></div>` +
         (d.codes.length ? d.codes.map((c) => `<div class="card" style="gap:10px">
           <div class="between"><span style="font-weight:600">${esc(c.name)}${c.paused ? ' · <span class="muted">pausiert</span>' : ''}</span><span class="muted">${fmtHours(c.usedChars)} / ${fmtHours(c.limitChars)}</span></div>
           <div class="meter"><div style="width:${Math.min(100, Math.round((c.usedChars / c.limitChars) * 100))}%"></div></div>
@@ -1150,8 +1219,8 @@
         if (P.playing) return pause();
         if (!P.started) return beginSession(P.idx, true);
         return resume();
-      case 'prev': return playFrom(P.idx - 1);
-      case 'next': return playFrom(P.idx + 1);
+      case 'prev': return jumpTo(P.idx - 1);
+      case 'next': return jumpTo(P.idx + 1);
       case 'plus10':
         return chooseTimer();
       case 'rate': {
