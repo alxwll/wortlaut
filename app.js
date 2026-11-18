@@ -1009,6 +1009,8 @@
     try {
       const v = await api('/voices');
       if (Array.isArray(v) && v.length) {
+        // HD-Stimmen immer zum Ausprobieren anbieten, auch wenn die Region sie nicht auflistet
+        for (const d of DEFAULT_VOICES.filter((x) => x.hd).reverse()) if (!v.some((x) => x.id === d.id)) v.unshift({ ...d, name: d.name + ' – testen' });
         state.voices = v;
         const sel = $('#voice');
         if (sel) sel.innerHTML = v.map((x) => `<option value="${esc(x.id)}" ${x.id === S.voice ? 'selected' : ''}>${esc(x.name)}${x.hd ? ' (HD, ausdrucksstark)' : x.multilingual ? ' (mehrsprachig)' : ''}</option>`).join('');
