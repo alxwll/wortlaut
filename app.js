@@ -105,6 +105,13 @@
     return `<div class="cover ph ${cls}" style="background:${bg};color:${fg}">${esc(book.title)}</div>`;
   }
   const I = {
+    lib: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4v16M9 4v16M13.5 5l4.5 14.5"/></svg>',
+    ear: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3.5" y="14" width="4" height="6" rx="1.5"/><rect x="16.5" y="14" width="4" height="6" rx="1.5"/></svg>',
+    moon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>',
+    gauge: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-5"/></svg>',
+    stop: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2.5"/></svg>',
+    pauseS: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6.5" y="5" width="4" height="14" rx="1.2"/><rect x="13.5" y="5" width="4" height="14" rx="1.2"/></svg>',
+    playM: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 4.5v15l12-7.5z"/></svg>',
     back: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>',
     down: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 9l7 7 7-7"/></svg>',
     plus: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
@@ -161,15 +168,45 @@
   // ---------------- Router ----------------
   const routes = [];
   const route = (re, fn) => routes.push([re, fn]);
-  function go(hash) { if (location.hash === hash) render(); else location.hash = hash; }
+  // replace = true: ersetzt den aktuellen Eintrag im Verlauf, damit „Zurück“ nicht durch alle Zwischenschritte führt
+  function go(hash, replace) {
+    if (location.hash === hash) return render();
+    if (replace) location.replace(hash); else location.hash = hash;
+  }
+  function tabOf(h) {
+    if (/^\/(player|stopped|listen)/.test(h)) return 'listen';
+    if (/^\/(settings|admin)/.test(h)) return 'settings';
+    return 'lib';
+  }
   async function render() {
     applyTheme();
     const h = location.hash.replace(/^#/, '') || '/';
+    state.tab = tabOf(h);
     for (const [re, fn] of routes) {
       const m = h.match(re);
-      if (m) { await fn(...m.slice(1)); window.scrollTo(0, 0); return; }
+      if (m) { await fn(...m.slice(1)); window.scrollTo(0, 0); updateChrome(); return; }
     }
-    go('#/');
+    go('#/', true);
+  }
+  // Untere Navigation + Mini-Player
+  function updateChrome() {
+    const nav = $('#tabbar');
+    const tabs = [['lib', '#/', 'Bibliothek', I.lib], ['listen', '#/player', 'Hören', I.ear], ['settings', '#/settings', 'Einstellungen', I.gear]];
+    nav.innerHTML = tabs.map(([k, href, label, icon]) => `<button class="tab ${state.tab === k ? 'on' : ''}" data-act="tab" data-v="${href}" ${state.tab === k ? 'aria-current="page"' : ''}>${icon}<span>${label}</span></button>`).join('');
+    updateMini();
+  }
+  const miniSub = () => `${pageLabel(state.book, P.idx)}${P.timer ? ' · ' + (P.timer.mode === 'sec' ? '≈ ' : '') + fmtTime(timerLeftMs()) : ''}`;
+  function updateMini() {
+    const mini = $('#mini');
+    const show = P.started && state.book && state.tab !== 'listen';
+    document.body.classList.toggle('has-mini', !!show);
+    if (!show) { mini.innerHTML = ''; return; }
+    const book = state.book;
+    mini.innerHTML = `<button class="mini-open" data-act="openplayer" aria-label="Player öffnen">
+        <span style="width:34px;flex-shrink:0">${coverHtml(book)}</span>
+        <span class="col" style="gap:0;min-width:0;text-align:left"><span class="mini-title">${esc(book.title)}</span><span class="small" id="minisub">${miniSub()}</span></span>
+      </button>
+      <button class="mini-play" data-act="toggle" aria-label="${P.playing ? 'Pause' : 'Abspielen'}">${P.playing ? I.pauseS : I.playM}</button>`;
   }
   window.addEventListener('hashchange', render);
 
@@ -209,14 +246,15 @@
         <div class="row" style="gap:16px">
           <div style="width:68px;flex-shrink:0">${coverHtml(recent)}</div>
           <div class="col grow" style="gap:4px">
-            <span class="label accent">Weiterhören</span>
+            <span class="label accent">Zuletzt gehört</span>
             <span class="serif" style="font-size:20px;font-weight:600">${esc(recent.title)}</span>
             <span class="muted">ab ${pageLabel(recent, p.pos)}</span>
+            <button class="btn link" style="height:32px;justify-content:flex-start" data-act="open" data-id="${esc(recent.id)}">Andere Stelle wählen</button>
           </div>
         </div>
         <div class="row"><div class="progress" role="img" aria-label="Fortschritt ${pct} Prozent"><div style="width:${pct}%"></div></div><span class="serif" style="font-size:18px;font-weight:600">${pct} %</span></div>
         <div class="between"><span class="muted">ca. ${leftMin >= 60 ? Math.floor(leftMin / 60) + ' h ' + (leftMin % 60) + ' min' : leftMin + ' min'} übrig</span>
-          <button class="btn solid" data-act="open" data-id="${esc(recent.id)}">${I.playS} Weiter</button></div>
+          <button class="btn solid" data-act="play-book" data-id="${esc(recent.id)}">${I.playS} Weiterhören</button></div>
       </div>`;
     }
     html += `<div class="col" style="gap:14px"><h2 class="label">Im Regal</h2>`;
@@ -639,9 +677,10 @@
     state.progress.lastAt = new Date().toISOString();
     P.endedBy = reason || 'timer';
     P.stopAfter = null;
+    P.started = false;
     saveProgress();
     if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'none';
-    go('#/stopped');
+    go('#/stopped', true);
   }
 
   // Timer
@@ -696,6 +735,8 @@
     if (!P.playing) return;
     tick();
     updateSun();
+    const ms = $('#minisub');
+    if (ms) ms.textContent = miniSub();
     if (state.progress && Date.now() - (state.progress._saved || 0) > 15000) {
       state.progress._saved = Date.now();
       state.progress.lastAt = new Date().toISOString();
@@ -718,6 +759,34 @@
       navigator.mediaSession.setActionHandler('seekforward', () => playFrom(P.idx + 1));
       navigator.mediaSession.playbackState = 'playing';
     } catch (e) { /* nicht überall verfügbar */ }
+  }
+
+  // Hören starten: Timer setzen, zum Player (ohne Zwischenschritte im Verlauf)
+  function beginSession(start, stay) {
+    const book = state.book;
+    startTimer(book, start);
+    P.started = true;
+    state.startIdx = null;
+    if (!stay) go('#/player', true);
+    return playFrom(start);
+  }
+  async function chooseTimer() {
+    const opts = [['0', 'Ohne Timer'], ['10', '10 Minuten'], ['20', '20 Minuten'], ['30', '30 Minuten'], ['sec', 'Bis Abschnittsende']];
+    if (P.started && P.timer && P.timer.mode === 'min') opts.unshift(['plus', '+10 Minuten dazu']);
+    const res = await sheet(`<h2 class="label">Sleep-Timer</h2><div>${opts.map(([v, l]) => `<button class="list-btn" data-v="${v}"><span>${l}</span>${String(S.timer) === v ? '✓' : ''}</button>`).join('')}</div>`);
+    if (res == null) return;
+    if (res === 'plus') {
+      P.timer.remainingMs += 600000; P.timer.totalMs += 600000; P.stopAfter = null;
+      updatePlayerUi(); toast('10 Minuten mehr');
+      return;
+    }
+    S.timer = res === 'sec' ? 'sec' : parseInt(res, 10);
+    saveSettings();
+    if (P.started) {
+      startTimer(state.book, P.idx);
+      P.sessionMs = 0;
+    }
+    updatePlayerUi();
   }
 
   // ---------------- Player-Ansicht ----------------
@@ -761,12 +830,12 @@
     const i = P.idx;
     const before = [];
     let n = 0;
-    for (let k = i - 1; k >= 0 && n < 220; k--) { before.unshift(T(book.sentences[k])); n += T(book.sentences[k]).length; }
+    for (let k = i - 1; k >= 0 && n < 160; k--) { before.unshift(T(book.sentences[k])); n += T(book.sentences[k]).length; }
     const after = [];
     n = 0;
-    for (let k = i + 1; k < book.sentences.length && n < 320; k++) { after.push(T(book.sentences[k])); n += T(book.sentences[k]).length; }
+    for (let k = i + 1; k < book.sentences.length && n < 260; k++) { after.push(T(book.sentences[k])); n += T(book.sentences[k]).length; }
     let beforeTxt = before.join(' ');
-    if (beforeTxt.length > 220) beforeTxt = '… ' + beforeTxt.slice(-220).replace(/^\S*\s/, '');
+    if (beforeTxt.length > 160) beforeTxt = '… ' + beforeTxt.slice(-160).replace(/^\S*\s/, '');
     box.innerHTML = `<p>${esc(beforeTxt)} <span class="cur">${esc(T(book.sentences[i]))}</span> ${esc(after.join(' '))}</p>`;
     const pg = $('#pagelbl');
     if (pg) pg.textContent = `${book.title} · ${pageLabel(book, i)}`;
@@ -780,8 +849,9 @@
   function updatePlayerUi() {
     const b = $('#mainbtn');
     if (b) { b.innerHTML = P.playing ? I.pause : I.play; b.setAttribute('aria-label', P.playing ? 'Pause' : 'Abspielen'); }
-    const tbtn = $('#plus10');
-    if (tbtn) tbtn.hidden = !(P.timer && P.timer.mode === 'min');
+    const tl = $('#timerlbl');
+    if (tl) tl.textContent = !P.timer ? 'Timer' : P.timer.mode === 'sec' ? 'Abschnitt' : `${Math.round(P.timer.totalMs / 60000)} min`;
+    updateMini();
     const err = $('#perr');
     if (err) err.innerHTML = P.error ? `<div class="banner">${esc(P.error)}${P.error.includes('Kontingent') ? '' : ' <a href="#/settings">Einstellungen</a>'}</div>` : '';
     updateSun();
@@ -789,14 +859,29 @@
     if ('mediaSession' in navigator) try { navigator.mediaSession.playbackState = P.playing ? 'playing' : 'paused'; } catch (e) {}
   }
 
+  async function recentBookId() {
+    const prog = (await dbAll('progress')).filter((p) => p.lastAt).sort((a, b) => b.lastAt.localeCompare(a.lastAt));
+    if (prog.length) return prog[0].id;
+    const books = await dbAll('books');
+    return books.length ? books[0].id : null;
+  }
   route(/^\/player$/, async () => {
-    if (!state.book) return go('#/');
+    if (!P.started) {
+      // Kein laufendes Hören: letztes Buch bereitlegen (pausiert, ein Tipp auf Play startet)
+      const id = state.book ? state.book.id : await recentBookId();
+      if (!id) {
+        app.innerHTML = `<div class="screen"><h1>Hören</h1><div class="empty">Noch kein Buch in der Bibliothek.</div><button class="btn solid big" data-act="add">${I.plus} EPUB laden</button></div>`;
+        return;
+      }
+      await loadBook(id);
+      if (!P.playing) P.idx = state.progress.pos;
+    }
     const book = state.book;
-    app.innerHTML = `<div class="screen" style="gap:18px">
-      <div class="between"><a href="#/book/${esc(book.id)}" class="icon-btn bare" aria-label="Player minimieren">${I.down}</a>
-        <span class="muted" id="pagelbl" style="text-align:center;flex:1"></span><span style="width:32px"></span></div>
+    app.innerHTML = `<div class="screen player">
+      <div class="between"><button class="icon-btn bare" data-act="minimize" aria-label="Player minimieren">${I.down}</button>
+        <button class="btn link" id="pagelbl" data-act="open" data-id="${esc(book.id)}" style="flex:1;justify-content:center;color:var(--muted);font-weight:500;min-width:0"></button><span style="width:32px"></span></div>
       ${P.engine === 'device' ? `<div class="banner">Vorschau mit Handy-Stimme. Für die natürliche Stimme <a href="#/settings">Zugang eintragen</a>.</div>` : ''}
-      <div class="col" style="align-items:center;gap:8px"><div class="sun-wrap" id="sun"></div><span class="muted" id="sunsub" style="text-align:center"></span></div>
+      <div class="col" style="align-items:center;gap:6px"><div class="sun-wrap" id="sun"></div><span class="muted" id="sunsub" style="text-align:center"></span></div>
       <div id="perr"></div>
       <div class="reading" id="reading" aria-live="off"></div>
       <div id="stopbox"></div>
@@ -805,10 +890,10 @@
         <button class="ctl main" id="mainbtn" data-act="toggle" aria-label="Pause">${I.pause}</button>
         <button class="ctl" data-act="next" aria-label="Einen Satz vor">${I.next}</button>
       </div>
-      <div class="chips" style="justify-content:center">
-        <button class="chip" style="flex:0 1 auto" id="plus10" data-act="plus10">+10 min</button>
-        <button class="chip" style="flex:0 1 auto" data-act="rate">${String(S.rate).replace('.', ',')}×</button>
-        <button class="chip" style="flex:0 1 auto" data-act="endnow">Beenden</button>
+      <div class="chips" style="justify-content:center;flex-wrap:nowrap">
+        <button class="chip ichip" id="plus10" data-act="plus10">${I.moon}<span id="timerlbl">Timer</span></button>
+        <button class="chip ichip" data-act="rate" aria-label="Tempo">${I.gauge}<span id="ratelbl">${String(S.rate).replace('.', ',')}×</span></button>
+        <button class="chip ichip" data-act="endnow">${I.stop}<span>Beenden</span></button>
       </div>
     </div>`;
     updatePlayerUi();
@@ -1031,27 +1116,35 @@
       }
       case 'start': {
         const start = state.startIdx != null ? state.startIdx : state.progress.pos;
-        startTimer(book, start);
-        state.startIdx = null;
-        go('#/player');
-        return playFrom(start);
+        return beginSession(start);
       }
+      case 'play-book': {
+        state.book = null;
+        await loadBook(el.dataset.id);
+        return beginSession(state.progress.pos);
+      }
+      case 'tab': return go(el.dataset.v, true);
+      case 'openplayer': return go('#/player', true);
+      case 'minimize': return go('#/', true);
       case 'selhit': state.selHit = +el.dataset.v; return render();
       case 'usehit': {
         state.startIdx = state.hits[state.selHit].idx;
-        return go('#/book/' + book.id);
+        return go('#/book/' + book.id, true);
       }
-      case 'toggle': return P.playing ? pause() : resume();
+      case 'toggle':
+        if (P.playing) return pause();
+        if (!P.started) return beginSession(P.idx, true);
+        return resume();
       case 'prev': return playFrom(P.idx - 1);
       case 'next': return playFrom(P.idx + 1);
       case 'plus10':
-        if (P.timer && P.timer.mode === 'min') { P.timer.remainingMs += 600000; P.timer.totalMs += 600000; P.stopAfter = null; updateSun(); toast('10 Minuten mehr'); }
-        return;
+        return chooseTimer();
       case 'rate': {
         const i = RATES.indexOf(S.rate);
         S.rate = RATES[(i + 1) % RATES.length];
         saveSettings();
-        el.textContent = String(S.rate).replace('.', ',') + '×';
+        const rl = $('#ratelbl');
+        if (rl) rl.textContent = String(S.rate).replace('.', ',') + '×';
         if (P.engine === 'cloud' && P.playing) playFrom(P.idx);
         return;
       }
@@ -1063,9 +1156,7 @@
       case 'more10': {
         S.timer = 10;
         saveSettings();
-        startTimer(book, state.progress.pos);
-        go('#/player');
-        return playFrom(state.progress.pos);
+        return beginSession(state.progress.pos);
       }
       case 'savecode': return saveCode();
       case 'clearkey': S.ownKey = ''; saveSettings(); return render();
