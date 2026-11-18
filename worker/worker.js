@@ -73,7 +73,8 @@ async function addUsage(env, code, n) {
 
 // parts: [[text, lang|null], ...]
 function buildSsml(parts, voice, rate) {
-  const multilingual = /Multilingual/i.test(voice);
+  const hd = /DragonHD/i.test(voice); // HD-Stimmen: kein <prosody>, Tempo regelt die App beim Abspielen
+  const multilingual = hd || /Multilingual/i.test(voice);
   const pct = Math.round((Number(rate) || 1) * 100 - 100);
   const rateAttr = (pct >= 0 ? '+' : '') + pct + '%';
   // Aufbau: <voice> → je Abschnitt [<lang>] → <prosody>. So akzeptiert Azure auch Sprachwechsel.
@@ -82,7 +83,7 @@ function buildSsml(parts, voice, rate) {
   let bufLang = null;
   const flush = () => {
     if (!buf) return;
-    const inner = `<prosody rate="${rateAttr}">${buf}</prosody>`;
+    const inner = hd ? buf : `<prosody rate="${rateAttr}">${buf}</prosody>`;
     body += bufLang ? `<lang xml:lang="${bufLang}">${inner}</lang>` : inner;
     buf = '';
   };
@@ -114,7 +115,7 @@ async function handleTts(request, env) {
   if (!chars) return json({ error: 'Kein Text.' }, 400);
   if (chars > 5000) return json({ error: 'Abschnitt zu lang.' }, 400);
 
-  const voice = /^[a-z]{2}-[A-Z]{2}-[A-Za-z0-9]+Neural$/.test(payload.voice || '') ? payload.voice : DEFAULT_VOICE;
+  const voice = /^[a-z]{2}-[A-Z]{2}-[A-Za-z0-9]+(:DragonHD[A-Za-z0-9]*)?Neural$/.test(payload.voice || '') ? payload.voice : DEFAULT_VOICE;
   const rate = Math.min(2, Math.max(0.5, Number(payload.rate) || 1));
 
   // Eigener Schlüssel der Person? Dann direkt damit, ohne Kontingent.
@@ -150,8 +151,12 @@ async function handleTts(request, env) {
     body: buildSsml(clean, voice, rate),
   });
   if (!res.ok) {
-    const msg = res.status === 401 ? 'Azure-Schlüssel ungültig.' : `Azure-Fehler ${res.status}`;
-    return json({ error: msg }, 502);
+    const detail = (await res.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 160);
+    let msg = `Azure-Fehler ${res.status}${detail ? ': ' + detail : ''}`;
+    if (res.status === 401) msg = 'Azure-Schlüssel ungültig.';
+    if (res.status === 429) msg = 'Das Azure-Kontingent für diesen Monat ist aufgebraucht – ab dem Monatsersten geht es weiter.';
+    if (res.status === 400 && /DragonHD/.test(voice)) msg = 'Diese HD-Stimme ist in deinem Azure-Tarif oder deiner Region nicht verfügbar. ' + msg;
+    return json({ error: msg, code: res.status === 429 ? 'quota' : undefined }, 502);
   }
   if (user) await addUsage(env, user.code, chars);
   return new Response(res.body, {
@@ -177,8 +182,11 @@ async function handleVoices(request, env) {
   const all = await res.json();
   const voices = all
     .filter((v) => v.Locale === 'de-DE' || (v.SecondaryLocaleList || []).includes('de-DE'))
-    .map((v) => ({ id: v.ShortName, name: v.DisplayName || v.LocalName, gender: v.Gender, multilingual: /Multilingual/.test(v.ShortName) }))
-    .sort((a, b) => Number(b.multilingual) - Number(a.multilingual) || a.name.localeCompare(b.name));
+    .map((v) => {
+      const hd = /DragonHD/.test(v.ShortName);
+      return { id: v.ShortName, name: (v.DisplayName || v.LocalName) + (hd && !/HD/.test(v.DisplayName || '') ? ' HD' : ''), gender: v.Gender, multilingual: /Multilingual/.test(v.ShortName), hd };
+    })
+    .sort((a, b) => Number(b.hd) - Number(a.hd) || Number(b.multilingual) - Number(a.multilingual) || a.name.localeCompare(b.name));
   if (!ownKey) await env.CODES.put('cache:voices', JSON.stringify(voices), { expirationTtl: 86400 });
   return json(voices);
 }

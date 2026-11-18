@@ -8,6 +8,8 @@
 
   // ---------------- Einstellungen ----------------
   const DEFAULT_VOICES = [
+    { id: 'de-DE-Seraphina:DragonHDLatestNeural', name: 'Seraphina HD', hd: true },
+    { id: 'de-DE-Florian:DragonHDLatestNeural', name: 'Florian HD', hd: true },
     { id: 'de-DE-SeraphinaMultilingualNeural', name: 'Seraphina', multilingual: true },
     { id: 'de-DE-FlorianMultilingualNeural', name: 'Florian', multilingual: true },
     { id: 'de-DE-KatjaNeural', name: 'Katja' },
@@ -17,8 +19,9 @@
   ];
   const RATES = [0.85, 0.9, 1, 1.1, 1.2, 1.3];
   const CHARS_PER_SEC = 15.5; // ungefähr bei Tempo 1,0
+  const isHD = (v) => /DragonHD/.test(v || '');
   const S = Object.assign(
-    { code: '', ownKey: '', ownRegion: 'westeurope', voice: DEFAULT_VOICES[0].id, rate: 1, theme: 'auto', workerUrl: '', timer: 20 },
+    { code: '', ownKey: '', ownRegion: 'westeurope', voice: 'de-DE-SeraphinaMultilingualNeural', rate: 1, theme: 'auto', workerUrl: '', timer: 20 },
     JSON.parse(localStorage.getItem('wortlaut.settings') || '{}')
   );
   const saveSettings = () => localStorage.setItem('wortlaut.settings', JSON.stringify(S));
@@ -564,6 +567,7 @@
       const url = await fetchChunk(ch);
       if (P.chunk !== ch || !P.playing) return;
       audio.src = url;
+      audio.playbackRate = isHD(S.voice) ? S.rate : 1; // HD-Stimmen kennen kein Tempo in SSML
       audio.volume = volumeFor();
       await audio.play();
       setLoading(false);
@@ -939,7 +943,7 @@
         <button class="btn" data-act="savecode">Code speichern</button>
       </div>
       <div class="card"><span class="label">Stimme</span>
-        <div class="field" style="background:var(--bg)"><label for="voice">Stimme</label><select id="voice">${(state.voices || DEFAULT_VOICES).map((v) => `<option value="${esc(v.id)}" ${v.id === S.voice ? 'selected' : ''}>${esc(v.name)}${v.multilingual ? ' (mehrsprachig)' : ''}</option>`).join('')}</select></div>
+        <div class="field" style="background:var(--bg)"><label for="voice">Stimme</label><select id="voice">${(state.voices || DEFAULT_VOICES).map((v) => `<option value="${esc(v.id)}" ${v.id === S.voice ? 'selected' : ''}>${esc(v.name)}${v.hd ? ' (HD, ausdrucksstark)' : v.multilingual ? ' (mehrsprachig)' : ''}</option>`).join('')}</select></div>
         <span class="small">Mehrsprachige Stimmen lesen fremdsprachige Stellen im Buch mit passender Aussprache.</span>
         <div class="chips">${RATES.map((r) => `<button class="chip ${r === S.rate ? 'on' : ''}" data-act="setrate" data-v="${r}">${String(r).replace('.', ',')}×</button>`).join('')}</div>
         <button class="btn" data-act="testvoice">${I.playS} Probehören</button>
@@ -1007,7 +1011,7 @@
       if (Array.isArray(v) && v.length) {
         state.voices = v;
         const sel = $('#voice');
-        if (sel) sel.innerHTML = v.map((x) => `<option value="${esc(x.id)}" ${x.id === S.voice ? 'selected' : ''}>${esc(x.name)}${x.multilingual ? ' (mehrsprachig)' : ''}</option>`).join('');
+        if (sel) sel.innerHTML = v.map((x) => `<option value="${esc(x.id)}" ${x.id === S.voice ? 'selected' : ''}>${esc(x.name)}${x.hd ? ' (HD, ausdrucksstark)' : x.multilingual ? ' (mehrsprachig)' : ''}</option>`).join('');
       }
     } catch (e) { /* Standardliste reicht */ }
   }
@@ -1026,6 +1030,7 @@
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Fehler ' + res.status);
       if (testAudio) testAudio.pause();
       testAudio = new Audio(URL.createObjectURL(await res.blob()));
+      testAudio.playbackRate = isHD(S.voice) ? S.rate : 1;
       testAudio.play();
     } catch (e) { toast(e.message); }
   }
