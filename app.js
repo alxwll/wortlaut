@@ -943,7 +943,7 @@
         <button class="btn" data-act="savecode">Code speichern</button>
       </div>
       <div class="card"><span class="label">Stimme</span>
-        <div class="field" style="background:var(--bg)"><label for="voice">Stimme</label><select id="voice">${(state.voices || DEFAULT_VOICES).map((v) => `<option value="${esc(v.id)}" ${v.id === S.voice ? 'selected' : ''}>${esc(v.name)}${v.hd ? ' (HD, ausdrucksstark)' : v.multilingual ? ' (mehrsprachig)' : ''}</option>`).join('')}</select></div>
+        <div class="field" style="background:var(--bg)"><label for="voice">Stimme</label><select id="voice">${voiceOptions(state.voices || DEFAULT_VOICES)}</select></div>
         <span class="small">Mehrsprachige Stimmen lesen fremdsprachige Stellen im Buch mit passender Aussprache.</span>
         <div class="chips">${RATES.map((r) => `<button class="chip ${r === S.rate ? 'on' : ''}" data-act="setrate" data-v="${r}">${String(r).replace('.', ',')}×</button>`).join('')}</div>
         <button class="btn" data-act="testvoice">${I.playS} Probehören</button>
@@ -1004,6 +1004,14 @@
       box.innerHTML = `<span class="muted">${esc(e.message)}</span>`;
     }
   }
+  // Stimmenliste: deutsche Stimmen oben, Sprecher anderer Sprachen (mit Akzent) darunter
+  function voiceOptions(list) {
+    const opt = (x) => `<option value="${esc(x.id)}" ${x.id === S.voice ? 'selected' : ''}>${esc(x.name)}${x.hd ? ' (ausdrucksstark)' : x.multilingual && x.id.startsWith('de-DE-') ? ' (mehrsprachig)' : ''}</option>`;
+    const de = list.filter((x) => x.id.startsWith('de-DE-'));
+    const other = list.filter((x) => !x.id.startsWith('de-DE-'));
+    return `<optgroup label="Deutsche Stimmen">${de.map(opt).join('')}</optgroup>` +
+      (other.length ? `<optgroup label="Andere Sprecher (sprechen Deutsch mit Akzent)">${other.map(opt).join('')}</optgroup>` : '');
+  }
   async function loadVoices() {
     if (state.voices || !hasCloudVoice()) return;
     try {
@@ -1013,7 +1021,7 @@
         for (const d of DEFAULT_VOICES.filter((x) => x.hd).reverse()) if (!v.some((x) => x.id === d.id)) v.unshift({ ...d, name: d.name + ' – testen' });
         state.voices = v;
         const sel = $('#voice');
-        if (sel) sel.innerHTML = v.map((x) => `<option value="${esc(x.id)}" ${x.id === S.voice ? 'selected' : ''}>${esc(x.name)}${x.hd ? ' (HD, ausdrucksstark)' : x.multilingual ? ' (mehrsprachig)' : ''}</option>`).join('');
+        if (sel) sel.innerHTML = voiceOptions(v);
       }
     } catch (e) { /* Standardliste reicht */ }
   }
