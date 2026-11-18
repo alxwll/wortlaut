@@ -1,0 +1,1109 @@
+/* Wort. Laut. – EPUBs vorlesen lassen. Vanilla JS, keine Build-Tools. */
+(function () {
+  'use strict';
+  const E = window.HBEpub;
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const app = $('#app');
+  const audio = $('#audio');
+
+  // ---------------- Einstellungen ----------------
+  const DEFAULT_VOICES = [
+    { id: 'de-DE-SeraphinaMultilingualNeural', name: 'Seraphina', multilingual: true },
+    { id: 'de-DE-FlorianMultilingualNeural', name: 'Florian', multilingual: true },
+    { id: 'de-DE-KatjaNeural', name: 'Katja' },
+    { id: 'de-DE-ConradNeural', name: 'Conrad' },
+    { id: 'de-DE-AmalaNeural', name: 'Amala' },
+    { id: 'de-DE-KillianNeural', name: 'Killian' },
+  ];
+  const RATES = [0.85, 0.9, 1, 1.1, 1.2, 1.3];
+  const CHARS_PER_SEC = 15.5; // ungefähr bei Tempo 1,0
+  const S = Object.assign(
+    { code: '', ownKey: '', ownRegion: 'westeurope', voice: DEFAULT_VOICES[0].id, rate: 1, theme: 'auto', workerUrl: '', timer: 20 },
+    JSON.parse(localStorage.getItem('wortlaut.settings') || '{}')
+  );
+  const saveSettings = () => localStorage.setItem('wortlaut.settings', JSON.stringify(S));
+  const workerUrl = () => (S.workerUrl || (window.HB_CONFIG && window.HB_CONFIG.workerUrl) || '').replace(/\/+$/, '');
+  const hasCloudVoice = () => !!(workerUrl() && (S.code || S.ownKey));
+  function authHeaders() {
+    const h = {};
+    if (S.ownKey) { h['X-Azure-Key'] = S.ownKey; h['X-Azure-Region'] = S.ownRegion || 'westeurope'; }
+    if (S.code) h['X-Code'] = S.code;
+    return h;
+  }
+  async function api(path, opts = {}) {
+    const res = await fetch(workerUrl() + path, {
+      ...opts,
+      headers: { 'Content-Type': 'application/json', ...authHeaders(), ...(opts.headers || {}) },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(data.error || 'Fehler ' + res.status), { status: res.status, code: data.code });
+    return data;
+  }
+
+  // ---------------- Speicher (IndexedDB) ----------------
+  let dbp;
+  function db() {
+    if (!dbp) dbp = new Promise((res, rej) => {
+      const r = indexedDB.open('wortlaut', 1);
+      r.onupgradeneeded = () => {
+        r.result.createObjectStore('books', { keyPath: 'id' });
+        r.result.createObjectStore('progress', { keyPath: 'id' });
+      };
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+    return dbp;
+  }
+  async function tx(store, mode, fn) {
+    const d = await db();
+    return new Promise((res, rej) => {
+      const t = d.transaction(store, mode);
+      const req = fn(t.objectStore(store));
+      t.oncomplete = () => res(req && req.result);
+      t.onerror = () => rej(t.error);
+    });
+  }
+  const dbGet = (s, k) => tx(s, 'readonly', (o) => o.get(k));
+  const dbAll = (s) => tx(s, 'readonly', (o) => o.getAll());
+  const dbPut = (s, v) => tx(s, 'readwrite', (o) => o.put(v));
+  const dbDel = (s, k) => tx(s, 'readwrite', (o) => o.delete(k));
+
+  // ---------------- Hilfen ----------------
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const T = (s) => E.sentenceText(s);
+  const fmtTime = (ms) => {
+    const s = Math.max(0, Math.round(ms / 1000));
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+    return h ? `${h}:${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}` : `${m}:${String(r).padStart(2, '0')}`;
+  };
+  const fmtHours = (chars) => {
+    const h = chars / 60000;
+    return h < 1 ? `${Math.round(h * 60)} min` : `${h.toFixed(1).replace('.', ',')} h`;
+  };
+  const pageLabel = (book, idx) => `${book.pageMarks ? '' : book.printPages ? 'ca. ' : '~'}S. ${E.pageOf(book, idx)}`;
+  let toastTimer;
+  function toast(msg) {
+    const t = $('#toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+  }
+  async function copy(text) {
+    try { await navigator.clipboard.writeText(text); toast('Satz kopiert'); }
+    catch { prompt('Zum Kopieren markieren:', text); }
+  }
+  const PH_COLORS = [['#2F3B52', '#F1ECE4'], ['#D9B48F', '#3B2A18'], ['#8DA2B5', '#1C2433'], ['#9AA58C', '#232A1C'], ['#C8692E', '#2A160A'], ['#A29D76', '#232114']];
+  function hash(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h); }
+  const coverUrls = new Map();
+  function coverHtml(book, cls = '') {
+    if (book.cover) {
+      if (!coverUrls.has(book.id)) coverUrls.set(book.id, URL.createObjectURL(new Blob([book.cover.bytes], { type: book.cover.type })));
+      return `<img class="cover ${cls}" src="${coverUrls.get(book.id)}" alt="Cover: ${esc(book.title)}">`;
+    }
+    const [bg, fg] = PH_COLORS[hash(book.title) % PH_COLORS.length];
+    return `<div class="cover ph ${cls}" style="background:${bg};color:${fg}">${esc(book.title)}</div>`;
+  }
+  const I = {
+    back: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>',
+    down: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 9l7 7 7-7"/></svg>',
+    plus: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
+    gear: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+    play: '<svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 4.5v15l12-7.5z"/></svg>',
+    playS: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l13-7.5z"/></svg>',
+    pause: '<svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6.5" y="5" width="4" height="14" rx="1.2"/><rect x="13.5" y="5" width="4" height="14" rx="1.2"/></svg>',
+    prev: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 7l-5 5 5 5M18 7l-5 5 5 5"/></svg>',
+    next: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 7l5 5-5 5M6 7l5 5-5 5"/></svg>',
+    copy: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>',
+    search: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>',
+    chev: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>',
+  };
+
+  // ---------------- Tag & Nacht (Sonnenstand, grob für Süddeutschland) ----------------
+  function isNight(d = new Date()) {
+    if (S.theme === 'day') return false;
+    if (S.theme === 'night') return true;
+    const lat = 48.78 * Math.PI / 180, lon = 9.18;
+    const start = new Date(d.getFullYear(), 0, 0);
+    const n = Math.floor((d - start) / 864e5);
+    const decl = 23.44 * Math.PI / 180 * Math.sin(2 * Math.PI * (284 + n) / 365);
+    const ha = Math.acos(Math.max(-1, Math.min(1, -Math.tan(lat) * Math.tan(decl)))) * 180 / Math.PI;
+    const tz = -d.getTimezoneOffset() / 60;
+    const noon = 12 - lon / 15 + tz;
+    const h = d.getHours() + d.getMinutes() / 60;
+    return h < noon - ha / 15 - 0.3 || h > noon + ha / 15 + 0.3;
+  }
+  function applyTheme() {
+    const night = isNight();
+    document.body.classList.toggle('night', night);
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = night ? '#1C2433' : '#EFE9E1';
+  }
+
+  // ---------------- Zustand ----------------
+  const state = {
+    book: null, progress: null, index: null, startIdx: null, hits: [], query: '', selHit: 0,
+    me: null, voices: null,
+  };
+  async function loadBook(id) {
+    if (state.book && state.book.id === id) return state.book;
+    const book = await dbGet('books', id);
+    if (!book) return null;
+    state.book = book;
+    state.index = null;
+    state.progress = (await dbGet('progress', id)) || { id, pos: book.startAt || 0, last: null, lastAt: null };
+    state.startIdx = null;
+    return book;
+  }
+  function ensureIndex() { if (!state.index) state.index = E.buildIndex(state.book); return state.index; }
+  async function saveProgress() { if (state.progress) await dbPut('progress', state.progress); }
+
+  // ---------------- Router ----------------
+  const routes = [];
+  const route = (re, fn) => routes.push([re, fn]);
+  function go(hash) { if (location.hash === hash) render(); else location.hash = hash; }
+  async function render() {
+    applyTheme();
+    const h = location.hash.replace(/^#/, '') || '/';
+    for (const [re, fn] of routes) {
+      const m = h.match(re);
+      if (m) { await fn(...m.slice(1)); window.scrollTo(0, 0); return; }
+    }
+    go('#/');
+  }
+  window.addEventListener('hashchange', render);
+
+  // Einladungslink: #code=xxxxx-xxxxx
+  (function inviteFromLink() {
+    const m = location.hash.match(/code=([a-z0-9-]+)/i);
+    if (m) {
+      S.code = m[1];
+      saveSettings();
+      history.replaceState(null, '', location.pathname + '#/');
+      setTimeout(() => toast('Zugang aktiviert – viel Spaß beim Hören'), 400);
+    }
+  })();
+
+  // ---------------- Bibliothek ----------------
+  route(/^\/$/, async () => {
+    const books = await dbAll('books');
+    const prog = Object.fromEntries((await dbAll('progress')).map((p) => [p.id, p]));
+    books.sort((a, b) => ((prog[b.id] && prog[b.id].lastAt) || b.addedAt || '').localeCompare((prog[a.id] && prog[a.id].lastAt) || a.addedAt || ''));
+    const recent = books.find((b) => prog[b.id] && prog[b.id].lastAt);
+    const now = new Date();
+    const dayName = now.toLocaleDateString('de-DE', { weekday: 'long' });
+    const part = isNight(now) ? 'Abend' : now.getHours() < 11 ? 'Vormittag' : now.getHours() < 14 ? 'Mittag' : 'Nachmittag';
+    let html = `<div class="screen">
+      <div class="between">
+        <div class="col" style="gap:2px"><span class="muted">${esc(dayName)}, ${part}</span><h1>Bibliothek</h1></div>
+        <div class="row" style="gap:8px">
+          <button class="icon-btn" data-act="settings" aria-label="Einstellungen">${I.gear}</button>
+          <button class="icon-btn" data-act="add" aria-label="EPUB hinzufügen">${I.plus}</button>
+        </div>
+      </div>`;
+    if (recent) {
+      const p = prog[recent.id];
+      const pct = E.percentOf(recent, p.pos);
+      const leftMin = Math.round((recent.totalChars - recent.sentences[Math.min(p.pos, recent.sentences.length - 1)].o) / CHARS_PER_SEC / 60 / (S.rate || 1));
+      html += `<div class="card">
+        <div class="row" style="gap:16px">
+          <div style="width:68px;flex-shrink:0">${coverHtml(recent)}</div>
+          <div class="col grow" style="gap:4px">
+            <span class="label accent">Weiterhören</span>
+            <span class="serif" style="font-size:20px;font-weight:600">${esc(recent.title)}</span>
+            <span class="muted">ab ${pageLabel(recent, p.pos)}</span>
+          </div>
+        </div>
+        <div class="row"><div class="progress" role="img" aria-label="Fortschritt ${pct} Prozent"><div style="width:${pct}%"></div></div><span class="serif" style="font-size:18px;font-weight:600">${pct} %</span></div>
+        <div class="between"><span class="muted">ca. ${leftMin >= 60 ? Math.floor(leftMin / 60) + ' h ' + (leftMin % 60) + ' min' : leftMin + ' min'} übrig</span>
+          <button class="btn solid" data-act="open" data-id="${esc(recent.id)}">${I.playS} Weiter</button></div>
+      </div>`;
+    }
+    html += `<div class="col" style="gap:14px"><h2 class="label">Im Regal</h2>`;
+    if (!books.length) {
+      html += `<div class="empty">Noch keine Bücher.<br>Lade eine EPUB-Datei, um loszulegen.</div>
+        <button class="btn solid big" data-act="add">${I.plus} EPUB laden</button>`;
+    } else {
+      html += `<div class="shelf">${books.map((b) => {
+        const p = prog[b.id];
+        const pct = p && p.lastAt ? E.percentOf(b, p.pos) : null;
+        return `<button class="book-tile" data-act="open" data-id="${esc(b.id)}" aria-label="${esc(b.title)} öffnen">${coverHtml(b)}<span class="small">${pct == null ? 'Neu' : pct + ' %'}</span></button>`;
+      }).join('')}<button class="add-tile" data-act="add">${I.plus}EPUB laden</button></div>`;
+    }
+    html += `</div>`;
+    if (!hasCloudVoice()) html += `<div class="banner">Noch ohne Vorlesestimme aus der Cloud – es liest die einfache Handy-Stimme. <a href="#/settings">Zugang eintragen</a></div>`;
+    html += `</div>`;
+    app.innerHTML = html;
+  });
+
+  // ---------------- Import ----------------
+  function pickFile() {
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = '.epub,application/epub+zip';
+    inp.onchange = () => inp.files[0] && importFile(inp.files[0]);
+    inp.click();
+  }
+  function busy(text) {
+    const el = document.createElement('div');
+    el.className = 'busy';
+    el.innerHTML = `<div class="spinner"></div><div>${esc(text)}</div>`;
+    document.body.appendChild(el);
+    return () => el.remove();
+  }
+  async function importFile(file) {
+    const done = busy('Lese Buch …');
+    let book;
+    try {
+      const parsed = await E.parseEpub(await file.arrayBuffer(), { JSZip: window.JSZip, DOMParser: window.DOMParser });
+      if (!parsed.sentences.length) throw new Error('In dieser Datei wurde kein Text gefunden.');
+      const id = 'b' + hash(parsed.title + '|' + parsed.author + '|' + parsed.totalChars).toString(36);
+      book = { id, ...parsed, printPages: null, addedAt: new Date().toISOString() };
+    } catch (e) {
+      done();
+      toast(e.message || 'Datei konnte nicht gelesen werden.');
+      return;
+    }
+    done();
+    const existing = await dbGet('books', book.id);
+    if (existing) { toast('Das Buch ist schon in deiner Bibliothek.'); go('#/book/' + book.id); return; }
+    if (book.pageMarks) toast('Echte Seitenzahlen der Druckausgabe gefunden');
+    else book.printPages = await askPages(book, null);
+    await dbPut('books', book);
+    await dbPut('progress', { id: book.id, pos: book.startAt || 0, last: null, lastAt: null });
+    state.book = null;
+    go('#/book/' + book.id);
+  }
+  function sheet(html) {
+    return new Promise((resolve) => {
+      const ov = document.createElement('div');
+      ov.className = 'overlay';
+      ov.innerHTML = `<div class="sheet" role="dialog" aria-modal="true">${html}</div>`;
+      const close = (v) => { ov.remove(); resolve(v); };
+      ov.addEventListener('click', (e) => {
+        if (e.target === ov) return close(undefined);
+        const b = e.target.closest('[data-v]');
+        if (b) close(b.dataset.v === '__form' ? ov.querySelector('form') : b.dataset.v);
+      });
+      ov.addEventListener('submit', (e) => { e.preventDefault(); close(ov.querySelector('form')); });
+      document.body.appendChild(ov);
+      const f = ov.querySelector('input');
+      if (f) setTimeout(() => f.focus(), 50);
+    });
+  }
+  async function askPages(book, current) {
+    const res = await sheet(`<form class="col" style="gap:16px">
+        <div class="row" style="gap:14px"><div style="width:56px;flex-shrink:0">${coverHtml(book)}</div>
+          <div class="col" style="gap:2px"><span class="serif" style="font-size:20px;font-weight:600">${esc(book.title)}</span><span class="muted">${esc(book.author)}</span></div></div>
+        <p class="muted" style="margin:0;line-height:1.5">Wie viele Seiten hat die gedruckte Ausgabe? Dann rechnet die App die Seitenzahlen passend zum Buch – auf etwa 1–2 Seiten genau. Du kannst das auch leer lassen.</p>
+        <div class="split" style="grid-template-columns:1fr 1fr">
+          <div class="field"><label for="pp">Seiten gesamt</label><input id="pp" name="pp" class="big" type="number" inputmode="numeric" min="1" value="${current && current.printPages ? current.printPages : ''}" placeholder="z. B. 288"></div>
+          <div class="field"><label for="fp">Text beginnt auf S.</label><input id="fp" name="fp" class="big" type="number" inputmode="numeric" min="1" value="${current && current.firstPage ? current.firstPage : ''}" placeholder="z. B. 7"></div>
+        </div>
+        <button class="btn solid big" type="submit">Speichern</button>
+        <button class="btn link" type="button" data-v="skip">Überspringen</button>
+      </form>`);
+    if (!res || res === 'skip') return current ? current.printPages : null;
+    const pp = parseInt(res.pp.value, 10);
+    const fp = parseInt(res.fp.value, 10);
+    book.firstPage = fp > 0 ? fp : null;
+    return pp > 0 ? pp : null;
+  }
+
+  // ---------------- Buchseite ----------------
+  route(/^\/book\/([^/]+)$/, async (id) => {
+    const book = await loadBook(id);
+    if (!book) return go('#/');
+    const p = state.progress;
+    if (state.startIdx == null) state.startIdx = p.pos;
+    const start = state.startIdx;
+    const listenMin = Math.round(book.totalChars / CHARS_PER_SEC / 60);
+    const timerOpts = [['0', 'Ohne'], ['10', '10'], ['20', '20'], ['30', '30'], ['sec', 'Abschnitt']];
+    const endIdx = timerEndIdx(book, start, S.timer);
+    let html = `<div class="screen">
+      <a href="#/" class="icon-btn bare" aria-label="Zurück zur Bibliothek">${I.back}</a>
+      <div class="row" style="gap:18px;align-items:flex-end">
+        <div style="width:80px;flex-shrink:0">${coverHtml(book)}</div>
+        <div class="col" style="gap:4px">
+          <h1 style="font-size:26px">${esc(book.title)}</h1>
+          <span class="muted" style="font-size:14px">${esc(book.author)}</span>
+          <span class="muted">${book.pageMarks ? book.pageMarks[book.pageMarks.length - 1].l + ' Seiten · ' : book.printPages ? book.printPages + ' Seiten · ' : ''}ca. ${Math.floor(listenMin / 60)} h ${listenMin % 60} min Hörzeit</span>
+        </div>
+      </div>`;
+    if (P.playing) {
+      html += `<a href="#/player" class="btn solid" style="text-decoration:none">${I.playS} Zurück zum Player</a>`;
+    }
+    if (p.lastAt && p.last != null) {
+      const when = new Date(p.lastAt);
+      const whenTxt = when.toDateString() === new Date().toDateString() ? 'heute, ' + when.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : when.toLocaleDateString('de-DE', { day: 'numeric', month: 'short' });
+      html += `<div class="card strong">
+        <div class="between" style="align-items:baseline"><span class="muted">Zuletzt gehört · ${esc(whenTxt)}</span><span class="serif" style="font-size:24px;font-weight:600">${pageLabel(book, p.last)}</span></div>
+        <p class="quote" style="font-size:17px">„${esc(T(book.sentences[p.last]))}“</p>
+        <button class="btn" style="align-self:flex-start;background:var(--bg)" data-act="copy-last">${I.copy} Satz kopieren</button>
+      </div>`;
+    }
+    html += `<div class="col" style="gap:10px">
+      <h2 class="label">Ab wo?</h2>
+      <div class="split">
+        <div class="field"><label for="page">Seite</label><input id="page" class="big" type="number" inputmode="numeric" min="1" placeholder="${E.pageOf(book, start)}"></div>
+        <form class="field" id="wordform"><label for="words">Oder 4–5 Wörter aus dem Text</label>
+          <div class="row" style="gap:6px;border-bottom:1.5px solid var(--line2)">${I.search}<input id="words" type="search" enterkeyhint="search" placeholder="Wörter einfügen" style="border:none"></div>
+        </form>
+      </div>
+      <div class="between"><span class="small">Wortsuche läuft ab deiner letzten Stelle nach vorn</span><button class="btn link" data-act="sections">Abschnitt wählen</button></div>
+      <div class="banner" id="startinfo"><b>Start ${pageLabel(book, start)}:</b> „${esc(T(book.sentences[start]).slice(0, 110))}${T(book.sentences[start]).length > 110 ? ' …' : ''}“</div>
+    </div>
+    <div class="col" style="gap:10px">
+      <h2 class="label">Wie lange? (Minuten)</h2>
+      <div class="chips">${timerOpts.map(([v, l]) => `<button class="chip ${String(S.timer) === v ? 'on' : ''}" data-act="timer" data-v="${v}">${l}</button>`).join('')}</div>
+      <span class="small">${endIdx != null ? `Endet ca. bei ${pageLabel(book, endIdx)} · ` : 'Läuft, bis du stoppst · '}Stimme: ${esc(voiceName(S.voice))}, ${String(S.rate).replace('.', ',')}×</span>
+    </div>
+    <button class="btn solid big" data-act="start">${I.playS} ${start === p.pos && p.lastAt ? 'Weiter ab' : 'Vorlesen ab'} ${pageLabel(book, start)}</button>
+    <div class="between" style="margin-top:8px">
+      ${book.pageMarks ? '<span class="small">Seitenzahlen exakt wie in der Druckausgabe</span>' : `<button class="btn link" data-act="pages">${book.printPages ? 'Seitenzahlen: Druckausgabe ' + book.printPages + ' S.' : 'Seitenzahl der Druckausgabe eintragen'}</button>`}
+      <button class="btn link danger" data-act="delete">Entfernen</button>
+    </div>
+    </div>`;
+    app.innerHTML = html;
+    const pageInp = $('#page');
+    pageInp.addEventListener('change', () => {
+      const n = parseInt(pageInp.value, 10);
+      if (n > 0) { state.startIdx = E.indexForPage(book, n); render(); }
+    });
+    $('#wordform').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const q = $('#words').value.trim();
+      if (q.length < 3) return toast('Bitte ein paar Wörter mehr eingeben.');
+      state.query = q;
+      go('#/search/' + book.id);
+    });
+  });
+  function voiceName(id) {
+    const v = (state.voices || DEFAULT_VOICES).find((x) => x.id === id);
+    return v ? v.name : id.replace(/^de-DE-|Multilingual|Neural/g, '');
+  }
+  function timerEndIdx(book, start, timer) {
+    if (timer === 'sec') {
+      const sec = book.sentences[start].s;
+      const next = book.sections[sec + 1];
+      return (next ? next.start : book.sentences.length) - 1;
+    }
+    const min = parseInt(timer, 10);
+    if (!min) return null;
+    const target = book.sentences[start].o + min * 60 * CHARS_PER_SEC * (S.rate || 1);
+    return E.indexForOffset(book, target);
+  }
+  async function chooseSection() {
+    const book = state.book;
+    const cur = book.sentences[state.startIdx].s;
+    const items = book.sections.map((s, i) => ({ s, i })).filter(({ s }) => s.chars > 300);
+    const res = await sheet(`<h2 class="label">Abschnitt wählen</h2><div>${items.map(({ s, i }) => `<button class="list-btn" data-v="${i}">
+      <span class="col" style="gap:2px;min-width:0"><span style="font-weight:${i === cur ? 700 : 500}">${esc(s.doc ? s.doc + ' · ' : '')}${esc(s.title)}${s.title.length >= 60 ? ' …' : ''}</span>
+      <span class="small">${pageLabel(book, s.start)} · ${Math.max(1, Math.round(s.chars / CHARS_PER_SEC / 60))} min</span></span>${I.chev}</button>`).join('')}</div>`);
+    if (res != null) { state.startIdx = book.sections[+res].start; render(); }
+  }
+
+  // ---------------- Wortsuche ----------------
+  route(/^\/search\/([^/]+)$/, async (id) => {
+    const book = await loadBook(id);
+    if (!book) return go('#/');
+    const from = state.progress.pos;
+    const hits = state.query ? E.search(book, ensureIndex(), state.query, from, 8) : [];
+    state.hits = hits;
+    if (state.selHit >= hits.length) state.selHit = 0;
+    const q = E.norm(state.query);
+    const mark = (idx) => {
+      const raw = T(book.sentences[idx]);
+      // Treffer im Originaltext grob markieren: Wort für Wort vergleichen
+      const words = raw.split(/(\s+)/);
+      const qWords = q.split(' ');
+      let out = '';
+      for (let i = 0; i < words.length; i++) {
+        let match = false;
+        if (E.norm(words[i]) === qWords[0]) {
+          let k = i, j = 0;
+          while (k < words.length && j < qWords.length) {
+            const n = E.norm(words[k]);
+            if (!n) { k++; continue; }
+            if (n !== qWords[j] && !(j === qWords.length - 1 && n.startsWith(qWords[j]))) break;
+            j++; k++;
+          }
+          if (j === qWords.length) {
+            out += '<mark>' + esc(words.slice(i, k).join('')) + '</mark>';
+            i = k - 1;
+            match = true;
+          }
+        }
+        if (!match) out += esc(words[i]);
+      }
+      return out;
+    };
+    const ctx = (idx) => `${idx > 0 ? '… ' + esc(T(book.sentences[idx - 1]).slice(-60)) + ' ' : ''}<span style="color:var(--text)">${mark(idx)}</span>`;
+    app.innerHTML = `<div class="screen">
+      <div class="row" style="gap:8px"><a href="#/book/${esc(id)}" class="icon-btn bare" aria-label="Zurück zum Buch">${I.back}</a><span class="muted" style="font-size:14px">${esc(book.title)} · Stelle suchen</span></div>
+      <form class="field" id="sform"><label for="sq">Wörter aus dem Text</label>
+        <div class="row" style="gap:8px;border-bottom:1.5px solid var(--text)">${I.search}<input id="sq" type="search" enterkeyhint="search" value="${esc(state.query)}" style="border:none;font-size:17px"></div></form>
+      <span class="muted">${hits.length ? `${hits.length === 8 ? 'Mindestens 8' : hits.length} Treffer · ab deiner letzten Stelle (${pageLabel(book, from)})` : 'Keine Stelle gefunden. Tipp: 4–5 Wörter am Stück, ohne Satzzeichen.'}</span>
+      <div class="col" style="gap:10px">${hits.map((h, i) => `<button class="hit ${i === state.selHit ? 'sel' : ''}" data-act="selhit" data-v="${i}">
+        <span class="between" style="width:100%;align-items:baseline"><span class="label ${i === 0 ? 'accent' : ''}">${i === 0 ? 'Nächster Treffer' : h.wrapped ? 'Weiter vorne im Buch' : 'Weiterer Treffer'}</span><span class="serif" style="font-size:${i === 0 ? 24 : 17}px;font-weight:600">${pageLabel(book, h.idx)}</span></span>
+        <span class="serif" style="font-size:${i === 0 ? 17 : 15}px;line-height:1.5;color:var(--muted)">${ctx(h.idx)}</span></button>`).join('')}</div>
+      ${hits.length ? `<button class="btn solid big" style="margin-top:auto" data-act="usehit">${I.playS} Ab hier · ${pageLabel(book, hits[state.selHit].idx)}</button>` : ''}
+    </div>`;
+    $('#sform').addEventListener('submit', (e) => { e.preventDefault(); state.query = $('#sq').value.trim(); state.selHit = 0; render(); });
+  });
+
+  // ---------------- Vorlese-Engine ----------------
+  const P = {
+    playing: false, loading: false, idx: 0, chunk: null, cache: new Map(), engine: 'cloud',
+    timer: null, sessionStart: 0, sessionMs: 0, lastTick: 0, stopAfter: null, endedBy: null, error: null,
+  };
+  const CH_MIN = 450, CH_MAX = 950;
+  function makeChunk(book, from) {
+    const parts = [], lens = [];
+    let chars = 0, i = from;
+    while (i < book.sentences.length) {
+      const s = book.sentences[i];
+      const len = T(s).length;
+      if (i > from && chars + len > CH_MAX) break;
+      for (const p of s.p) parts.push([p[0], p[1]]);
+      parts.push([' ', null]);
+      lens.push(len + 1);
+      chars += len + 1;
+      i++;
+      if (s.pe) parts.push(['', '#p']);
+      if (chars >= CH_MIN && s.pe) break;
+      if (chars >= CH_MAX * 0.85) break;
+    }
+    return { from, to: i, parts, lens, chars, key: `${from}|${S.voice}|${S.rate}` };
+  }
+  async function fetchChunk(ch) {
+    if (P.cache.has(ch.key)) return P.cache.get(ch.key);
+    const pr = (async () => {
+      const res = await fetch(workerUrl() + '/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ parts: ch.parts, voice: S.voice, rate: S.rate }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw Object.assign(new Error(d.error || 'Vorlesen fehlgeschlagen (' + res.status + ')'), { code: d.code });
+      }
+      return URL.createObjectURL(await res.blob());
+    })();
+    P.cache.set(ch.key, pr);
+    pr.catch(() => P.cache.delete(ch.key));
+    // Cache klein halten
+    if (P.cache.size > 8) {
+      const first = P.cache.keys().next().value;
+      const old = P.cache.get(first);
+      P.cache.delete(first);
+      old.then((u) => URL.revokeObjectURL(u)).catch(() => {});
+    }
+    return pr;
+  }
+  function prefetch(book, ch) {
+    let next = ch;
+    for (let k = 0; k < 2 && next.to < book.sentences.length; k++) {
+      next = makeChunk(book, next.to);
+      fetchChunk(next).catch(() => {});
+    }
+  }
+
+  async function playFrom(idx) {
+    const book = state.book;
+    stopAudio();
+    P.idx = Math.max(0, Math.min(idx, book.sentences.length - 1));
+    P.playing = true;
+    P.error = null;
+    P.lastTick = Date.now();
+    P.engine = hasCloudVoice() ? 'cloud' : 'device';
+    setLoading(true);
+    updatePlayerUi();
+    if (P.engine === 'device') return speakDevice(P.idx);
+    const ch = makeChunk(book, P.idx);
+    P.chunk = ch;
+    try {
+      const url = await fetchChunk(ch);
+      if (P.chunk !== ch || !P.playing) return;
+      audio.src = url;
+      audio.volume = volumeFor();
+      await audio.play();
+      setLoading(false);
+      prefetch(book, ch);
+      setupMediaSession();
+    } catch (e) {
+      if (P.chunk !== ch) return;
+      setLoading(false);
+      P.playing = false;
+      P.error = e.message;
+      updatePlayerUi();
+      toast(e.message);
+    }
+  }
+  function stopAudio() {
+    audio.pause();
+    if ('speechSynthesis' in window) speechSynthesis.cancel();
+    P.chunk = null;
+  }
+  function setLoading(v) { P.loading = v; const b = $('#mainbtn'); if (b) b.classList.toggle('loading', v); }
+
+  audio.addEventListener('timeupdate', () => {
+    tick(); // läuft auch, wenn das Handy im Hintergrund Timer drosselt
+    const ch = P.chunk;
+    if (!ch || !audio.duration || !isFinite(audio.duration)) return;
+    const frac = audio.currentTime / audio.duration;
+    const target = frac * ch.chars;
+    let acc = 0, k = 0;
+    while (k < ch.lens.length - 1 && acc + ch.lens[k] < target) { acc += ch.lens[k]; k++; }
+    const idx = ch.from + k;
+    if (idx !== P.idx) onSentence(idx);
+  });
+  audio.addEventListener('ended', () => {
+    const ch = P.chunk;
+    if (!ch || !P.playing) return;
+    if (P.stopAfter != null && P.stopAfter < ch.to) return finishSession(ch.to - 1);
+    if (ch.to >= state.book.sentences.length) return finishSession(ch.to - 1, 'end');
+    playFrom(ch.to);
+  });
+  audio.addEventListener('pause', () => { if (P.playing && P.chunk && !audio.ended && !P.loading) { /* von außen pausiert (Kopfhörer) */ pause(); } });
+  audio.addEventListener('error', () => {
+    if (!P.playing || !P.chunk) return;
+    toast('Wiedergabe unterbrochen – versuche es erneut.');
+    pause();
+  });
+
+  function onSentence(idx) {
+    const prev = P.idx;
+    P.idx = idx;
+    if (P.stopAfter != null && idx > P.stopAfter) return finishSession(P.stopAfter);
+    if (P.timer && P.timer.mode === 'sec' && idx > P.timer.endIdx) return finishSession(P.timer.endIdx);
+    state.progress.pos = idx;
+    if (idx !== prev) updateText();
+  }
+
+  // Handy-Stimme als Rückfall
+  function speakDevice(idx) {
+    if (!('speechSynthesis' in window)) { P.playing = false; setLoading(false); toast('Dieses Gerät kann nicht vorlesen.'); return updatePlayerUi(); }
+    const book = state.book;
+    P.idx = idx;
+    const u = new SpeechSynthesisUtterance(T(book.sentences[idx]));
+    u.lang = 'de-DE';
+    u.rate = S.rate;
+    u.volume = volumeFor();
+    const de = speechSynthesis.getVoices().find((v) => v.lang && v.lang.startsWith('de'));
+    if (de) u.voice = de;
+    u.onstart = () => setLoading(false);
+    u.onend = () => {
+      if (!P.playing || P.engine !== 'device' || P.idx !== idx) return;
+      if (P.stopAfter != null && idx >= P.stopAfter) return finishSession(idx);
+      if (P.timer && P.timer.mode === 'sec' && idx >= P.timer.endIdx) return finishSession(idx);
+      if (idx + 1 >= book.sentences.length) return finishSession(idx, 'end');
+      onSentence(idx + 1);
+      if (P.playing) speakDevice(idx + 1);
+    };
+    speechSynthesis.speak(u);
+    updateText();
+  }
+
+  function pause() {
+    if (!P.playing) return;
+    tick();
+    P.playing = false;
+    if (P.engine === 'device') speechSynthesis.cancel(); else audio.pause();
+    setLoading(false);
+    state.progress.pos = P.idx;
+    state.progress.last = P.idx;
+    state.progress.lastAt = new Date().toISOString();
+    saveProgress();
+    updatePlayerUi();
+  }
+  function resume() {
+    if (P.playing) return;
+    if (P.engine === 'cloud' && P.chunk && audio.src && !audio.ended && hasCloudVoice()) {
+      P.playing = true;
+      P.lastTick = Date.now();
+      audio.volume = volumeFor();
+      audio.play().catch(() => playFrom(P.idx));
+      updatePlayerUi();
+    } else {
+      playFrom(P.idx);
+    }
+  }
+  function finishSession(lastIdx, reason) {
+    P.playing = false;
+    stopAudio();
+    setLoading(false);
+    const book = state.book;
+    state.progress.last = lastIdx;
+    state.progress.pos = Math.min(lastIdx + 1, book.sentences.length - 1);
+    state.progress.lastAt = new Date().toISOString();
+    P.endedBy = reason || 'timer';
+    P.stopAfter = null;
+    saveProgress();
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'none';
+    go('#/stopped');
+  }
+
+  // Timer
+  function startTimer(book, start) {
+    P.sessionMs = 0;
+    P.stopAfter = null;
+    if (S.timer === 'sec') {
+      P.timer = { mode: 'sec', startIdx: start, endIdx: timerEndIdx(book, start, 'sec') };
+    } else if (parseInt(S.timer, 10) > 0) {
+      const ms = parseInt(S.timer, 10) * 60000;
+      P.timer = { mode: 'min', totalMs: ms, remainingMs: ms };
+    } else {
+      P.timer = null;
+    }
+  }
+  function tick() {
+    const now = Date.now();
+    const dt = now - (P.lastTick || now);
+    P.lastTick = now;
+    if (!P.playing || P.loading) return;
+    P.sessionMs += dt;
+    if (P.timer && P.timer.mode === 'min') {
+      P.timer.remainingMs -= dt;
+      if (P.timer.remainingMs <= 0 && P.stopAfter == null) {
+        P.timer.remainingMs = 0;
+        P.stopAfter = P.idx; // aktuellen Satz noch zu Ende lesen
+      }
+    }
+    if (P.engine === 'cloud') audio.volume = volumeFor();
+  }
+  function volumeFor() {
+    const left = timerLeftMs();
+    if (left == null || left > 60000) return 1;
+    return 0.45 + 0.55 * Math.max(0, left / 60000); // letzte Minute leiser
+  }
+  function timerLeftMs() {
+    if (!P.timer) return null;
+    if (P.timer.mode === 'min') return Math.max(0, P.timer.remainingMs);
+    const book = state.book;
+    const end = book.sentences[P.timer.endIdx];
+    const chars = end.o + T(end).length - book.sentences[P.idx].o;
+    return Math.max(0, (chars / (CHARS_PER_SEC * S.rate)) * 1000);
+  }
+  function timerFraction() {
+    if (!P.timer) return null;
+    if (P.timer.mode === 'min') return 1 - Math.max(0, P.timer.remainingMs) / P.timer.totalMs;
+    const book = state.book;
+    const a = book.sentences[P.timer.startIdx].o, b = book.sentences[P.timer.endIdx].o + 1;
+    return Math.min(1, Math.max(0, (book.sentences[P.idx].o - a) / Math.max(1, b - a)));
+  }
+  setInterval(() => {
+    if (!P.playing) return;
+    tick();
+    updateSun();
+    if (state.progress && Date.now() - (state.progress._saved || 0) > 15000) {
+      state.progress._saved = Date.now();
+      state.progress.lastAt = new Date().toISOString();
+      state.progress.last = P.idx;
+      saveProgress();
+    }
+  }, 500);
+
+  function setupMediaSession() {
+    if (!('mediaSession' in navigator)) return;
+    const book = state.book;
+    const art = book.cover ? [{ src: coverUrls.get(book.id) || '', sizes: '512x768', type: book.cover.type }] : [];
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({ title: book.title, artist: book.author, album: 'Wort. Laut.', artwork: art });
+      navigator.mediaSession.setActionHandler('play', () => resume());
+      navigator.mediaSession.setActionHandler('pause', () => pause());
+      navigator.mediaSession.setActionHandler('previoustrack', () => playFrom(P.idx - 1));
+      navigator.mediaSession.setActionHandler('nexttrack', () => playFrom(P.idx + 1));
+      navigator.mediaSession.setActionHandler('seekbackward', () => playFrom(P.idx - 1));
+      navigator.mediaSession.setActionHandler('seekforward', () => playFrom(P.idx + 1));
+      navigator.mediaSession.playbackState = 'playing';
+    } catch (e) { /* nicht überall verfügbar */ }
+  }
+
+  // ---------------- Player-Ansicht ----------------
+  function sunSvg(frac) {
+    const cx = 171, cy = 126, r = 120;
+    let sun = '';
+    if (frac != null) {
+      const a = Math.PI * Math.min(1, Math.max(0, frac));
+      const x = (cx - r * Math.cos(a)).toFixed(1), y = (cy - r * Math.sin(a)).toFixed(1);
+      sun = `${frac > 0.005 ? `<path d="M51 126 A120 120 0 0 1 ${x} ${y}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" opacity="${document.body.classList.contains('night') ? 0.5 : 1}"/>` : ''}
+        <circle cx="${x}" cy="${y}" r="20" fill="var(--accent)" opacity="0.08"/><circle cx="${x}" cy="${y}" r="13" fill="var(--accent)" opacity="0.16"/><circle cx="${x}" cy="${y}" r="8" fill="var(--accent)"/>`;
+    }
+    const stars = `<g fill="var(--star)"><circle cx="30" cy="20" r="1.2"/><circle cx="120" cy="8" r="1"/><circle cx="214" cy="18" r="1.2"/><circle cx="318" cy="30" r="0.9"/><circle cx="12" cy="74" r="0.9"/></g>`;
+    return `<svg viewBox="0 0 342 128" role="img" aria-label="Sleep-Timer">${stars}
+      <path d="M51 126 A120 120 0 0 1 291 126" fill="none" stroke="var(--line2)" stroke-width="1.5" stroke-dasharray="3 5"/>${sun}
+      <line x1="0" y1="126" x2="342" y2="126" stroke="var(--text)" stroke-opacity=".75" stroke-width="1.5"/></svg>`;
+  }
+  function sunTexts() {
+    const book = state.book;
+    const left = timerLeftMs();
+    if (P.timer) {
+      const sub = P.timer.mode === 'sec' ? 'bis Abschnittsende' : 'bis Sonnenuntergang';
+      const extra = !P.playing ? 'pausiert' : left < 60000 ? 'Stimme wird leiser' : `endet ${pageLabel(book, P.timer.mode === 'sec' ? P.timer.endIdx : E.indexForOffset(book, book.sentences[P.idx].o + (left / 1000) * CHARS_PER_SEC * S.rate))}`;
+      return { big: (P.timer.mode === 'sec' ? '≈ ' : '') + fmtTime(left), word: false, sub: `${sub} · ${extra}` };
+    }
+    if (!P.playing) return { big: 'Pausiert', word: true, sub: `ohne Timer · ${Math.round(P.sessionMs / 60000)} min gehört` };
+    return { big: fmtTime(P.sessionMs), word: false, sub: 'gehört · ohne Timer' };
+  }
+  function updateSun() {
+    const w = $('#sun');
+    if (!w) return;
+    const t = sunTexts();
+    w.innerHTML = sunSvg(P.timer ? timerFraction() : null) + `<span class="sun-time ${t.word ? 'word' : ''}">${esc(t.big)}</span>`;
+    const sub = $('#sunsub');
+    if (sub) sub.textContent = t.sub;
+  }
+  function updateText() {
+    const box = $('#reading');
+    if (!box || !state.book) return;
+    const book = state.book;
+    const i = P.idx;
+    const before = [];
+    let n = 0;
+    for (let k = i - 1; k >= 0 && n < 220; k--) { before.unshift(T(book.sentences[k])); n += T(book.sentences[k]).length; }
+    const after = [];
+    n = 0;
+    for (let k = i + 1; k < book.sentences.length && n < 320; k++) { after.push(T(book.sentences[k])); n += T(book.sentences[k]).length; }
+    let beforeTxt = before.join(' ');
+    if (beforeTxt.length > 220) beforeTxt = '… ' + beforeTxt.slice(-220).replace(/^\S*\s/, '');
+    box.innerHTML = `<p>${esc(beforeTxt)} <span class="cur">${esc(T(book.sentences[i]))}</span> ${esc(after.join(' '))}</p>`;
+    const pg = $('#pagelbl');
+    if (pg) pg.textContent = `${book.title} · ${pageLabel(book, i)}`;
+    const sb = $('#stopbox');
+    if (sb) sb.innerHTML = !P.playing ? stopBoxHtml() : '';
+  }
+  function stopBoxHtml() {
+    return `<div class="stop-box"><span class="col" style="gap:2px"><span class="small">Gestoppt bei</span><span class="serif" style="font-size:20px;font-weight:600">${pageLabel(state.book, P.idx)}</span></span>
+      <button class="btn" data-act="copy-cur" style="background:var(--bg)">${I.copy} Satz kopieren</button></div>`;
+  }
+  function updatePlayerUi() {
+    const b = $('#mainbtn');
+    if (b) { b.innerHTML = P.playing ? I.pause : I.play; b.setAttribute('aria-label', P.playing ? 'Pause' : 'Abspielen'); }
+    const tbtn = $('#plus10');
+    if (tbtn) tbtn.hidden = !(P.timer && P.timer.mode === 'min');
+    const err = $('#perr');
+    if (err) err.innerHTML = P.error ? `<div class="banner">${esc(P.error)}${P.error.includes('Kontingent') ? '' : ' <a href="#/settings">Einstellungen</a>'}</div>` : '';
+    updateSun();
+    updateText();
+    if ('mediaSession' in navigator) try { navigator.mediaSession.playbackState = P.playing ? 'playing' : 'paused'; } catch (e) {}
+  }
+
+  route(/^\/player$/, async () => {
+    if (!state.book) return go('#/');
+    const book = state.book;
+    app.innerHTML = `<div class="screen" style="gap:18px">
+      <div class="between"><a href="#/book/${esc(book.id)}" class="icon-btn bare" aria-label="Player minimieren">${I.down}</a>
+        <span class="muted" id="pagelbl" style="text-align:center;flex:1"></span><span style="width:32px"></span></div>
+      ${P.engine === 'device' ? `<div class="banner">Vorschau mit Handy-Stimme. Für die natürliche Stimme <a href="#/settings">Zugang eintragen</a>.</div>` : ''}
+      <div class="col" style="align-items:center;gap:8px"><div class="sun-wrap" id="sun"></div><span class="muted" id="sunsub" style="text-align:center"></span></div>
+      <div id="perr"></div>
+      <div class="reading" id="reading" aria-live="off"></div>
+      <div id="stopbox"></div>
+      <div class="controls">
+        <button class="ctl" data-act="prev" aria-label="Einen Satz zurück">${I.prev}</button>
+        <button class="ctl main" id="mainbtn" data-act="toggle" aria-label="Pause">${I.pause}</button>
+        <button class="ctl" data-act="next" aria-label="Einen Satz vor">${I.next}</button>
+      </div>
+      <div class="chips" style="justify-content:center">
+        <button class="chip" style="flex:0 1 auto" id="plus10" data-act="plus10">+10 min</button>
+        <button class="chip" style="flex:0 1 auto" data-act="rate">${String(S.rate).replace('.', ',')}×</button>
+        <button class="chip" style="flex:0 1 auto" data-act="endnow">Beenden</button>
+      </div>
+    </div>`;
+    updatePlayerUi();
+  });
+
+  // ---------------- Gestoppt ----------------
+  route(/^\/stopped$/, async () => {
+    if (!state.book) return go('#/');
+    const book = state.book;
+    const p = state.progress;
+    const mins = Math.max(1, Math.round(P.sessionMs / 60000));
+    const night = document.body.classList.contains('night');
+    const sentence = T(book.sentences[p.last]);
+    app.innerHTML = `<div class="screen">
+      <svg viewBox="0 0 342 120" role="img" aria-label="Die Sonne ist untergegangen" style="width:100%;height:auto">
+        <g fill="var(--star)"><circle cx="40" cy="20" r="1.3"/><circle cx="98" cy="48" r="1"/><circle cx="150" cy="14" r="1.5"/><circle cx="214" cy="40" r="1"/><circle cx="262" cy="10" r="1.2"/><circle cx="300" cy="56" r="0.9"/></g>
+        <path d="M291 104 A20 20 0 0 1 331 104 Z" fill="var(--accent)" opacity="0.18"/><path d="M299 104 A12 12 0 0 1 323 104 Z" fill="var(--accent)" opacity="0.6"/>
+        <line x1="0" y1="104" x2="342" y2="104" stroke="var(--line)" stroke-width="1.5"/></svg>
+      <p class="muted" style="text-align:center;margin:0;font-size:14px">${P.endedBy === 'end' ? 'Ende des Buches erreicht.' : (night ? 'Gute Nacht. ' : '') + `Du hast ${mins === 1 ? 'eine Minute' : mins + ' Minuten'} gehört.`}</p>
+      <div class="card" style="align-items:center;text-align:center;gap:16px;padding:26px 22px">
+        <span class="label accent">Weiterlesen auf</span>
+        <span class="big-page">${pageLabel(book, p.last).replace('ca. ', '')}</span>
+        <span class="muted" style="font-size:14px">${esc(book.title)} · ${E.percentOf(book, p.last)} %${book.printPages || book.pageMarks ? '' : ' · Seite geschätzt'}</span>
+        <div style="width:100%;height:1px;background:var(--line)"></div>
+        <span class="small">Letzter Satz – zum Suchen im Reader</span>
+        <p class="quote">„${esc(sentence)}“</p>
+        <button class="btn" data-act="copy-last" style="background:var(--bg)">${I.copy} Satz kopieren</button>
+      </div>
+      <div class="col" style="margin-top:auto;gap:8px">
+        ${P.endedBy === 'end' ? '' : `<button class="btn solid big" data-act="more10">Noch 10 Minuten</button>`}
+        <a href="#/" class="btn link" style="justify-content:center;text-decoration:none">Zur Bibliothek</a>
+      </div>
+    </div>`;
+  });
+
+  // ---------------- Einstellungen ----------------
+  route(/^\/settings$/, async () => {
+    const hasWorker = !!workerUrl();
+    app.innerHTML = `<div class="screen">
+      <div class="row" style="gap:8px"><a href="#/" class="icon-btn bare" aria-label="Zurück">${I.back}</a><h1 style="font-size:26px">Einstellungen</h1></div>
+      <div class="card"><span class="label">Zugang</span><div id="me" class="col"><span class="muted">${hasWorker ? (S.code ? 'Prüfe Zugang …' : 'Noch kein Zugangscode eingetragen.') : 'In config.js ist noch keine Worker-Adresse eingetragen.'}</span></div>
+        <form id="codeform" class="field" style="background:var(--bg)"><label for="code">Zugangscode</label><input id="code" autocomplete="off" autocapitalize="off" value="${esc(S.code)}" placeholder="z. B. abcde-fghij"></form>
+        <button class="btn" data-act="savecode">Code speichern</button>
+      </div>
+      <div class="card"><span class="label">Stimme</span>
+        <div class="field" style="background:var(--bg)"><label for="voice">Stimme</label><select id="voice">${(state.voices || DEFAULT_VOICES).map((v) => `<option value="${esc(v.id)}" ${v.id === S.voice ? 'selected' : ''}>${esc(v.name)}${v.multilingual ? ' (mehrsprachig)' : ''}</option>`).join('')}</select></div>
+        <span class="small">Mehrsprachige Stimmen lesen fremdsprachige Stellen im Buch mit passender Aussprache.</span>
+        <div class="chips">${RATES.map((r) => `<button class="chip ${r === S.rate ? 'on' : ''}" data-act="setrate" data-v="${r}">${String(r).replace('.', ',')}×</button>`).join('')}</div>
+        <button class="btn" data-act="testvoice">${I.playS} Probehören</button>
+      </div>
+      <div class="card"><span class="label">Darstellung</span>
+        <div class="chips">${[['auto', 'Nach Sonnenstand'], ['day', 'Hell'], ['night', 'Dunkel']].map(([v, l]) => `<button class="chip ${S.theme === v ? 'on' : ''}" data-act="theme" data-v="${v}">${l}</button>`).join('')}</div>
+      </div>
+      <details class="card"><summary class="label" style="cursor:pointer">Eigener Azure-Schlüssel (optional)</summary>
+        <p class="small" style="line-height:1.5;margin:4px 0 0">Mit eigenem Schlüssel hörst du über dein eigenes Azure-Konto statt über ein geteiltes Kontingent. Der Schlüssel bleibt auf diesem Gerät und wird nur zum Vorlesen durchgereicht.</p>
+        <form id="keyform" class="col" style="gap:10px">
+          <div class="field" style="background:var(--bg)"><label for="okey">Schlüssel</label><input id="okey" type="password" autocomplete="off" value="${esc(S.ownKey)}"></div>
+          <div class="field" style="background:var(--bg)"><label for="oreg">Region</label><input id="oreg" autocomplete="off" value="${esc(S.ownRegion)}" placeholder="westeurope"></div>
+          <div class="row"><button class="btn" type="submit">Speichern</button>${S.ownKey ? '<button class="btn link danger" type="button" data-act="clearkey">Entfernen</button>' : ''}</div>
+        </form>
+      </details>
+      <details class="card"><summary class="label" style="cursor:pointer">Server</summary>
+        <form id="wform" class="col" style="gap:10px"><div class="field" style="background:var(--bg)"><label for="wurl">Worker-Adresse</label><input id="wurl" autocomplete="off" value="${esc(S.workerUrl)}" placeholder="${esc((window.HB_CONFIG && window.HB_CONFIG.workerUrl) || 'https://….workers.dev')}"></div>
+        <button class="btn" type="submit">Speichern</button></form>
+      </details>
+      <div id="adminlink"></div>
+    </div>`;
+    $('#voice').addEventListener('change', (e) => { S.voice = e.target.value; saveSettings(); P.cache.clear(); });
+    $('#codeform').addEventListener('submit', (e) => { e.preventDefault(); saveCode(); });
+    $('#keyform').addEventListener('submit', (e) => {
+      e.preventDefault();
+      S.ownKey = $('#okey').value.trim();
+      S.ownRegion = $('#oreg').value.trim().toLowerCase() || 'westeurope';
+      saveSettings();
+      toast('Gespeichert');
+      render();
+    });
+    $('#wform').addEventListener('submit', (e) => { e.preventDefault(); S.workerUrl = $('#wurl').value.trim(); saveSettings(); toast('Gespeichert'); render(); });
+    loadMe();
+    loadVoices();
+  });
+  function saveCode() {
+    S.code = $('#code').value.trim();
+    saveSettings();
+    state.me = null;
+    toast('Gespeichert');
+    render();
+  }
+  async function loadMe() {
+    const box = $('#me');
+    if (!box || !workerUrl() || !S.code) return;
+    try {
+      const me = await api('/me');
+      state.me = me;
+      const limit = me.limitChars;
+      const pct = limit ? Math.min(100, Math.round((me.usedChars / limit) * 100)) : null;
+      box.innerHTML = `<span style="font-weight:600">${esc(me.name)}${me.paused ? ' · pausiert' : ''}</span>
+        ${limit ? `<div class="meter" role="img" aria-label="${pct} Prozent verbraucht"><div style="width:${pct}%"></div></div>
+        <span class="muted">${fmtHours(me.usedChars)} von ${fmtHours(limit)} diesen Monat gehört</span>`
+        : `<span class="muted">Diesen Monat ${fmtHours(me.usedChars)} gehört · ohne Limit</span>`}
+        ${S.ownKey ? '<span class="small">Gerade aktiv: dein eigener Azure-Schlüssel.</span>' : ''}`;
+      if (me.admin) $('#adminlink').innerHTML = `<a class="list-btn" href="#/admin" style="text-decoration:none;color:inherit"><span class="col" style="gap:2px"><span style="font-weight:600">Zugänge verwalten</span><span class="small">Personen einladen, Kontingente festlegen</span></span>${I.chev}</a>`;
+    } catch (e) {
+      box.innerHTML = `<span class="muted">${esc(e.message)}</span>`;
+    }
+  }
+  async function loadVoices() {
+    if (state.voices || !hasCloudVoice()) return;
+    try {
+      const v = await api('/voices');
+      if (Array.isArray(v) && v.length) {
+        state.voices = v;
+        const sel = $('#voice');
+        if (sel) sel.innerHTML = v.map((x) => `<option value="${esc(x.id)}" ${x.id === S.voice ? 'selected' : ''}>${esc(x.name)}${x.multilingual ? ' (mehrsprachig)' : ''}</option>`).join('');
+      }
+    } catch (e) { /* Standardliste reicht */ }
+  }
+  let testAudio;
+  async function testVoice() {
+    if (!hasCloudVoice()) {
+      const u = new SpeechSynthesisUtterance('So klingt die einfache Handy-Stimme.');
+      u.lang = 'de-DE';
+      return speechSynthesis.speak(u);
+    }
+    try {
+      const res = await fetch(workerUrl() + '/tts', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ voice: S.voice, rate: S.rate, parts: [['Hallo! So klinge ich, wenn ich dir dein Buch vorlese. Gute Unterhaltung beim Zuhören.', null]] }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Fehler ' + res.status);
+      if (testAudio) testAudio.pause();
+      testAudio = new Audio(URL.createObjectURL(await res.blob()));
+      testAudio.play();
+    } catch (e) { toast(e.message); }
+  }
+
+  // ---------------- Zugänge verwalten ----------------
+  route(/^\/admin$/, async () => {
+    app.innerHTML = `<div class="screen">
+      <div class="row" style="gap:8px"><a href="#/settings" class="icon-btn bare" aria-label="Zurück">${I.back}</a><h1 style="font-size:26px">Zugänge</h1></div>
+      <div id="alist" class="col" style="gap:10px"><span class="muted">Lade …</span></div>
+      <form id="newform" class="card"><span class="label">Neue Person einladen</span>
+        <div class="split" style="grid-template-columns:2fr 1fr">
+          <div class="field" style="background:var(--bg)"><label for="nname">Name</label><input id="nname" required maxlength="60" placeholder="z. B. Lena"></div>
+          <div class="field" style="background:var(--bg)"><label for="nhours">Stunden/Monat</label><input id="nhours" type="number" inputmode="decimal" step="0.5" min="0.5" value="2"></div>
+        </div>
+        <button class="btn solid" type="submit">Einladung erstellen</button>
+        <span class="small">Gratis bei Azure: ca. 8 Stunden pro Monat – für alle zusammen, dich eingeschlossen.</span>
+      </form>
+    </div>`;
+    $('#newform').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        const rec = await api('/admin/codes', { method: 'POST', body: JSON.stringify({ name: $('#nname').value, hours: parseFloat(String($('#nhours').value).replace(',', '.')) }) });
+        await shareInvite(rec);
+        render();
+      } catch (err) { toast(err.message); }
+    });
+    loadAdmin();
+  });
+  function inviteLink(code) { return location.origin + location.pathname + '#code=' + code; }
+  async function shareInvite(rec) {
+    const link = inviteLink(rec.code);
+    const text = `Hier ist dein Zugang zu Wort. Laut., der Vorlese-App: ${link}`;
+    if (navigator.share) { try { await navigator.share({ title: 'Wort. Laut.', text }); return; } catch (e) { /* abgebrochen */ } }
+    try { await navigator.clipboard.writeText(text); toast('Einladungslink kopiert'); } catch { prompt('Einladungslink:', link); }
+  }
+  async function loadAdmin() {
+    const box = $('#alist');
+    try {
+      const d = await api('/admin/codes');
+      const totalLimit = d.codes.reduce((n, c) => n + c.limitChars, 0);
+      const totalUsed = d.codes.reduce((n, c) => n + c.usedChars, 0) + d.adminUsedChars;
+      box.innerHTML = `<div class="card"><span class="label">Diesen Monat</span>
+          <div class="meter"><div style="width:${Math.min(100, Math.round((totalUsed / 500000) * 100))}%"></div></div>
+          <span class="muted">${fmtHours(totalUsed)} von ca. 8,3 h Gratis-Kontingent verbraucht · du selbst: ${fmtHours(d.adminUsedChars)}</span>
+          <span class="small">Vergeben an andere: ${fmtHours(totalLimit)} pro Monat</span></div>` +
+        (d.codes.length ? d.codes.map((c) => `<div class="card" style="gap:10px">
+          <div class="between"><span style="font-weight:600">${esc(c.name)}${c.paused ? ' · <span class="muted">pausiert</span>' : ''}</span><span class="muted">${fmtHours(c.usedChars)} / ${fmtHours(c.limitChars)}</span></div>
+          <div class="meter"><div style="width:${Math.min(100, Math.round((c.usedChars / c.limitChars) * 100))}%"></div></div>
+          <div class="chips">
+            <button class="chip" data-act="ainvite" data-code="${esc(c.code)}">Link teilen</button>
+            <button class="chip" data-act="ahours" data-code="${esc(c.code)}" data-h="${c.limitChars / 60000}">Stunden</button>
+            <button class="chip" data-act="apause" data-code="${esc(c.code)}" data-p="${c.paused ? '0' : '1'}">${c.paused ? 'Fortsetzen' : 'Pausieren'}</button>
+            <button class="chip" data-act="adel" data-code="${esc(c.code)}" data-name="${esc(c.name)}" aria-label="${esc(c.name)} löschen">Löschen</button>
+          </div></div>`).join('') : `<p class="muted" style="margin:0">Noch niemand eingeladen.</p>`);
+    } catch (e) {
+      box.innerHTML = `<div class="banner">${esc(e.message)}</div>`;
+    }
+  }
+
+  // ---------------- Klicks ----------------
+  document.addEventListener('click', async (e) => {
+    const el = e.target.closest('[data-act]');
+    if (!el || el.closest('.overlay')) return;
+    const act = el.dataset.act;
+    const book = state.book;
+    switch (act) {
+      case 'add': return pickFile();
+      case 'settings': return go('#/settings');
+      case 'open': state.book = null; return go('#/book/' + el.dataset.id);
+      case 'timer': S.timer = el.dataset.v === 'sec' ? 'sec' : parseInt(el.dataset.v, 10); saveSettings(); return render();
+      case 'sections': return chooseSection();
+      case 'copy-last': return copy(T(book.sentences[state.progress.last]));
+      case 'copy-cur': return copy(T(book.sentences[P.idx]));
+      case 'pages': {
+        const pp = await askPages(book, book);
+        book.printPages = pp;
+        await dbPut('books', book);
+        return render();
+      }
+      case 'delete': {
+        const ok = await sheet(`<p class="serif" style="font-size:20px;margin:0">„${esc(book.title)}“ aus der Bibliothek entfernen?</p><p class="muted" style="margin:0">Die EPUB-Datei auf deinem Handy bleibt erhalten, nur die App vergisst das Buch und deinen Fortschritt.</p>
+          <button class="btn solid big" data-v="yes">Entfernen</button><button class="btn link" data-v="no">Abbrechen</button>`);
+        if (ok !== 'yes') return;
+        await dbDel('books', book.id);
+        await dbDel('progress', book.id);
+        state.book = null;
+        return go('#/');
+      }
+      case 'start': {
+        const start = state.startIdx != null ? state.startIdx : state.progress.pos;
+        startTimer(book, start);
+        state.startIdx = null;
+        go('#/player');
+        return playFrom(start);
+      }
+      case 'selhit': state.selHit = +el.dataset.v; return render();
+      case 'usehit': {
+        state.startIdx = state.hits[state.selHit].idx;
+        return go('#/book/' + book.id);
+      }
+      case 'toggle': return P.playing ? pause() : resume();
+      case 'prev': return playFrom(P.idx - 1);
+      case 'next': return playFrom(P.idx + 1);
+      case 'plus10':
+        if (P.timer && P.timer.mode === 'min') { P.timer.remainingMs += 600000; P.timer.totalMs += 600000; P.stopAfter = null; updateSun(); toast('10 Minuten mehr'); }
+        return;
+      case 'rate': {
+        const i = RATES.indexOf(S.rate);
+        S.rate = RATES[(i + 1) % RATES.length];
+        saveSettings();
+        el.textContent = String(S.rate).replace('.', ',') + '×';
+        if (P.engine === 'cloud' && P.playing) playFrom(P.idx);
+        return;
+      }
+      case 'endnow': {
+        const last = P.idx;
+        tick();
+        return finishSession(last, 'manual');
+      }
+      case 'more10': {
+        S.timer = 10;
+        saveSettings();
+        startTimer(book, state.progress.pos);
+        go('#/player');
+        return playFrom(state.progress.pos);
+      }
+      case 'savecode': return saveCode();
+      case 'clearkey': S.ownKey = ''; saveSettings(); return render();
+      case 'setrate': S.rate = parseFloat(el.dataset.v); saveSettings(); P.cache.clear(); return render();
+      case 'theme': S.theme = el.dataset.v; saveSettings(); return render();
+      case 'testvoice': return testVoice();
+      case 'ainvite': return shareInvite({ code: el.dataset.code });
+      case 'ahours': {
+        const res = await sheet(`<form class="col" style="gap:14px"><div class="field"><label for="hh">Stunden pro Monat</label><input id="hh" name="hh" class="big" type="number" inputmode="decimal" step="0.5" min="0.5" value="${el.dataset.h}"></div><button class="btn solid big" type="submit">Speichern</button></form>`);
+        if (!res || !res.hh) return;
+        try { await api('/admin/codes/' + el.dataset.code, { method: 'PATCH', body: JSON.stringify({ hours: parseFloat(String(res.hh.value).replace(',', '.')) }) }); } catch (err) { toast(err.message); }
+        return loadAdmin();
+      }
+      case 'apause':
+        try { await api('/admin/codes/' + el.dataset.code, { method: 'PATCH', body: JSON.stringify({ paused: el.dataset.p === '1' }) }); } catch (err) { toast(err.message); }
+        return loadAdmin();
+      case 'adel': {
+        const ok = await sheet(`<p class="serif" style="font-size:20px;margin:0">Zugang von ${esc(el.dataset.name)} löschen?</p><p class="muted" style="margin:0">Der Einladungslink funktioniert dann nicht mehr.</p><button class="btn solid big" data-v="yes">Löschen</button><button class="btn link" data-v="no">Abbrechen</button>`);
+        if (ok !== 'yes') return;
+        try { await api('/admin/codes/' + el.dataset.code, { method: 'DELETE' }); } catch (err) { toast(err.message); }
+        return loadAdmin();
+      }
+    }
+  });
+
+  // Sicherheitsnetz: Fortschritt sichern, wenn die App in den Hintergrund geht
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && state.progress && P.playing) {
+      state.progress.last = P.idx;
+      state.progress.pos = P.idx;
+      state.progress.lastAt = new Date().toISOString();
+      saveProgress();
+    }
+    if (!document.hidden) applyTheme();
+  });
+  setInterval(applyTheme, 60000);
+
+  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+  render();
+})();
