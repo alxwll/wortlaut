@@ -1002,7 +1002,7 @@
     toast('Gespeichert');
     render();
   }
-  // Kontingent als Sonnenbogen: links aufgegangen = verbraucht, Rest = übrig
+  // Kontingent-Anzeige
   const fmtHM = (chars) => {
     const m = Math.max(0, Math.round(chars / 1000)); // 1.000 Zeichen ≈ 1 Minute
     return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min` : `${m} min`;
@@ -1012,33 +1012,13 @@
     return new Date(d.getFullYear(), d.getMonth() + 1, 1).toLocaleDateString('de-DE', { day: 'numeric', month: 'long' });
   }
   function quotaGauge(limit, parts) {
-    // parts: [{ chars, color, label }]
-    const pt = (f) => {
-      const a = Math.PI * Math.min(1, Math.max(0, f));
-      return [(120 - 100 * Math.cos(a)).toFixed(1), (124 - 100 * Math.sin(a)).toFixed(1)];
-    };
+    // parts: [{ chars, color, label }] – dezenter, gestapelter Balken
     const used = parts.reduce((n, p) => n + p.chars, 0);
-    let f0 = 0, arcs = '';
-    for (const p of parts) {
-      const f1 = Math.min(1, f0 + p.chars / limit);
-      if (f1 > f0 + 0.002) {
-        const [x0, y0] = pt(f0), [x1, y1] = pt(f1);
-        arcs += `<path d="M${x0} ${y0} A100 100 0 0 1 ${x1} ${y1}" fill="none" stroke="${p.color}" stroke-width="10" stroke-linecap="round"/>`;
-      }
-      f0 = f1;
-    }
-    const [sx, sy] = pt(f0);
     const left = Math.max(0, limit - used);
-    return `<div class="sun-wrap" style="max-width:280px">
-        <svg viewBox="0 0 240 132" role="img" aria-label="${fmtHM(used)} verbraucht, ${fmtHM(left)} übrig">
-          <path d="M20 124 A100 100 0 0 1 220 124" fill="none" stroke="var(--line)" stroke-width="10" stroke-linecap="round"/>
-          ${arcs}
-          <circle cx="${sx}" cy="${sy}" r="14" fill="var(--accent)" opacity=".18"/><circle cx="${sx}" cy="${sy}" r="7" fill="var(--accent)"/>
-        </svg>
-        <span class="sun-time" style="bottom:4%;font-size:30px">${fmtHM(left)}</span>
-      </div>
-      <span class="muted" style="text-align:center">übrig von ${fmtHM(limit)} · neu am ${resetDate()}</span>
-      <div class="col" style="gap:4px;margin-top:4px">${parts.map((p) => `<span class="row small" style="gap:8px"><span style="width:10px;height:10px;border-radius:5px;background:${p.color};flex-shrink:0"></span>${esc(p.label)}: ${fmtHM(p.chars)}</span>`).join('')}</div>`;
+    const segs = parts.map((p) => `<div style="width:${Math.min(100, (p.chars / limit) * 100).toFixed(2)}%;height:6px;background:${p.color}"></div>`).join('');
+    return `<div class="between" style="align-items:baseline"><span style="font-weight:600">${fmtHM(left)} übrig</span><span class="small">von ${fmtHM(limit)} · neu am ${resetDate()}</span></div>
+      <div role="img" aria-label="${fmtHM(used)} verbraucht, ${fmtHM(left)} übrig" style="display:flex;height:6px;border-radius:3px;overflow:hidden;background:var(--line)">${segs}</div>
+      ${parts.length > 1 ? `<div class="row" style="gap:14px;flex-wrap:wrap">${parts.map((p) => `<span class="row small" style="gap:6px"><span style="width:8px;height:8px;border-radius:4px;background:${p.color}"></span>${esc(p.label)}: ${fmtHM(p.chars)}</span>`).join('')}</div>` : `<span class="small">${fmtHM(used)} verbraucht</span>`}`;
   }
   const FREE_CHARS = 500000; // Azure-Gratis-Kontingent pro Monat
 
@@ -1149,7 +1129,7 @@
       const d = await api('/admin/codes');
       const totalLimit = d.codes.reduce((n, c) => n + c.limitChars, 0);
       const totalUsed = d.codes.reduce((n, c) => n + c.usedChars, 0) + d.adminUsedChars;
-      box.innerHTML = `<div class="card" style="align-items:stretch"><span class="label">Gratis-Kontingent diesen Monat</span>
+      box.innerHTML = `<div class="card" style="gap:10px"><span class="label">Gratis-Kontingent diesen Monat</span>
           ${quotaGauge(FREE_CHARS, [
             { chars: d.adminUsedChars, color: 'var(--accent)', label: 'Du' },
             { chars: totalUsed - d.adminUsedChars, color: '#8DA2B5', label: 'Eingeladene' },
