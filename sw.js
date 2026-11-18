@@ -1,5 +1,5 @@
 // Offline-Cache für die App-Hülle. Bücher liegen in IndexedDB, Audio wird nicht gecacht.
-const VERSION = 'wortlaut-v2';
+const VERSION = 'wortlaut-v3';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'epub.js', 'config.js', 'vendor/jszip.min.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -16,7 +16,7 @@ self.addEventListener('fetch', (e) => {
   // Eigene Dateien: erst Netz (damit Updates ankommen), sonst Cache
   if (url.origin === location.origin) {
     e.respondWith(
-      fetch(e.request)
+      fetch(e.request, { cache: 'no-cache' }) // immer beim Server nachfragen, damit Updates sofort ankommen
         .then((res) => {
           const copy = res.clone();
           caches.open(VERSION).then((c) => c.put(e.request, copy));
