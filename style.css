@@ -242,3 +242,8 @@ body.look-young {
 .look-young .screen.stopped .card { background: #FAF7F2; }
 .look-young .screen.stopped .muted { color: #141414; }
 .look-young .screen.stopped .btn.solid { background: #141414; color: #DDF35B; }
+
+/* Cover vollständig zeigen: echtes Seitenverhältnis statt Zuschnitt */
+img.cover { aspect-ratio: auto; height: auto; object-fit: contain; }
+.shelf { align-items: end; }
+.book-tile { justify-content: flex-end; }
