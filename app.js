@@ -413,7 +413,7 @@
       <h2 class="label">Wo geht's weiter?</h2>
       <div class="seg" role="tablist" aria-label="Stelle finden über">${tabs.map(([k, l]) => `<button role="tab" aria-selected="${mode === k}" class="${mode === k ? 'on' : ''}" data-act="findmode" data-v="${k}">${l}</button>`).join('')}</div>
       ${finder}
-      <div class="banner" id="startinfo"><b>Start ${pageLabel(book, start)}:</b> „${esc(T(book.sentences[start]).slice(0, 110))}${T(book.sentences[start]).length > 110 ? ' …' : ''}“</div>
+      <div class="startline" id="startinfo"><span class="startdot">${I.playS}</span><span><b>Beginnt auf ${pageLabel(book, start)} mit:</b> „${esc(T(book.sentences[start]).slice(0, 110))}${T(book.sentences[start]).length > 110 ? ' …' : ''}“</span></div>
     </div>
     <div class="col" style="gap:10px">
       <h2 class="label row" style="gap:6px">${I.moon} Sleep-Timer <span style="text-transform:none;letter-spacing:0;font-weight:500">(optional)</span></h2>
