@@ -685,6 +685,8 @@
   function rdTurn(d) {
     const book = R.book, view = $('#rdview');
     if (!view) return;
+    rdMenuClose();
+    if (rdLive()) R.followPause = Date.now() + 8000;
     if (rd().mode === 'scroll') { view.scrollBy({ top: d * (view.clientHeight - 60), behavior: 'smooth' }); return; }
     const np = R.page + d;
     if (np >= R.pages) { if (R.sec + 1 < book.sections.length) rdLoad(R.sec + 1, book.sections[R.sec + 1].start); }
@@ -716,6 +718,8 @@
     });
     view.addEventListener('click', (e) => {
       if (swiped) { swiped = false; return; }
+      if (R.pressed) { R.pressed = false; return; }
+      if ($('.rd-menu')) { rdMenuClose(); return; }
       if (e.target.closest('button')) return;
       if (rd().mode === 'scroll') return rdBare(!R.bare);
       const r = view.getBoundingClientRect(), x = (e.clientX - r.left) / (r.width || 1);
@@ -729,6 +733,7 @@
       clearTimeout(st);
       st = setTimeout(() => rdSync(), 120);
       if (!R.bare && view.scrollTop > 40) rdBare(true);
+      if (rdLive() && !R.autoScroll) R.followPause = Date.now() + 8000;
     }, { passive: true });
   }
   route(/^\/read$/, async () => {
@@ -751,9 +756,11 @@
     </div>`;
     rdStyle();
     rdBindGestures();
+    rdBindPress();
     try { await Promise.race([document.fonts.load(`400 20px ${(RD_FONTS.find((f) => f[0] === rd().font) || RD_FONTS[0])[2].split(',')[0]}`), new Promise((r) => setTimeout(r, 1200))]); } catch (e) {}
     if (!$('.reader')) return;
     rdLoad(book.sentences[start].s, start);
+    rdFollow();
   });
   async function rdChooseChapter() {
     const book = R.book;
@@ -804,9 +811,124 @@
   function rdListen() {
     if (rdLive()) return;
     const idx = R.mark != null && R.mark >= R.idx && rdOnScreen(R.mark) ? R.mark : R.idx;
+    return rdPlayFrom(idx);
+  }
+
+  // ---------- Mitlesen: der Reader folgt der Stimme ----------
+  function rdFollow() {
+    if (!$('.reader') || !R.book) return;
+    rdFoot();
+    const text = $('#rdtext');
+    const prev = text.querySelector('.rd-cur');
+    if (!rdLive() && !(P.started && state.book && state.book.id === R.book.id)) { if (prev) prev.classList.remove('rd-cur'); return; }
+    const idx = P.idx;
+    if (prev && +prev.dataset.i === idx) return;
+    if (prev) prev.classList.remove('rd-cur');
+    if (!rdLive()) return;
+    if (Date.now() < (R.followPause || 0) || $('.rd-menu')) return;
+    const sec = R.book.sentences[idx].s;
+    if (sec !== R.sec) { rdLoad(sec, idx); }
+    const el = text.querySelector(`[data-i="${idx}"]`);
+    if (!el) return;
+    el.classList.add('rd-cur');
+    if (rd().mode === 'scroll') {
+      const view = $('#rdview'), r = el.getBoundingClientRect(), v = view.getBoundingClientRect();
+      if (r.top < v.top + 20 || r.bottom > v.bottom - 60) {
+        R.autoScroll = true; clearTimeout(R.asT); R.asT = setTimeout(() => { R.autoScroll = false; }, 900);
+        view.scrollBy({ top: r.top - v.top - v.height * 0.3, behavior: 'smooth' });
+      }
+    } else {
+      // umblättern, sobald der Satz auf der nächsten Seite beginnt oder dorthin weiterläuft
+      const p = rdPageOf(idx);
+      if (p !== R.page) rdGo(p, idx);
+      else R.idx = idx;
+    }
+  }
+  // ---------- Satz gedrückt halten: Vorlesen · Das war gut · Kopieren ----------
+  function rdMenuClose() {
+    const m = $('.rd-menu');
+    if (m) m.remove();
+    const s = $('#rdtext .rd-sel');
+    if (s) s.classList.remove('rd-sel');
+  }
+  function rdMenu(el) {
+    rdMenuClose();
+    const idx = +el.dataset.i, reader = $('.reader');
+    el.classList.add('rd-sel');
+    const m = document.createElement('div');
+    m.className = 'rd-menu';
+    m.setAttribute('role', 'menu');
+    m.innerHTML = `<button role="menuitem" data-rm="play" data-i="${idx}"><span class="rd-mi">${I.playS}</span>Vorlesen</button>
+      <button role="menuitem" data-rm="quote" data-i="${idx}" class="hot">${I.heart}Das war gut</button>
+      <button role="menuitem" data-rm="copy" data-i="${idx}">Kopieren</button>`;
+    reader.appendChild(m);
+    const rr = reader.getBoundingClientRect(), er = el.getClientRects()[0] || el.getBoundingClientRect();
+    const mh = m.offsetHeight || 52;
+    let top = er.top - rr.top - mh - 10;
+    m.classList.toggle('below', top < 60);
+    if (top < 60) top = er.bottom - rr.top + 10;
+    m.style.top = top + 'px';
+  }
+  async function rdMenuAct(kind, idx) {
+    rdMenuClose();
+    const book = R.book;
+    if (kind === 'copy') {
+      const txt = `„${T(book.sentences[idx])}“ – ${book.title}, ${pageLabel(book, idx)}`;
+      try { await navigator.clipboard.writeText(txt); toast('Kopiert'); } catch (e) { toast('Kopieren ging nicht'); }
+      return;
+    }
+    if (kind === 'quote') {
+      const q = { id: 'q' + Date.now().toString(36), bookId: book.id, from: idx, to: idx, createdAt: new Date().toISOString() };
+      await saveQuote(q);
+      const el = $(`#rdtext [data-i="${idx}"]`);
+      if (el) { el.classList.add('rd-quoted'); setTimeout(() => el.classList.remove('rd-quoted'), 1600); }
+      toast('Gemerkt – du findest es bei den Zitaten');
+      return;
+    }
+    if (kind === 'play') return rdPlayFrom(idx);
+  }
+  // Vorlesen starten, ohne den Reader zu verlassen (Mitlesen)
+  function rdPlayFrom(idx) {
+    R.mark = null;
+    const old = $('#rdtext .rd-mark');
+    if (old) old.classList.remove('rd-mark');
+    R.followPause = 0;
+    if (P.started && state.book && state.book.id === R.book.id) {
+      state.progress.pos = idx;
+      if (P.playing) return jumpTo(idx);
+      P.idx = idx; P.chunk = null;
+      return resume();
+    }
     state.progress.pos = idx;
     if (P.started) { P.idx = idx; P.chunk = null; }
-    return beginSession(idx);
+    return beginSession(idx, true);
+  }
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-rm]');
+    if (b) { e.preventDefault(); return rdMenuAct(b.dataset.rm, +b.dataset.i); }
+    if ($('.rd-menu') && !e.target.closest('.rd-menu') && !e.target.closest('#rdview')) rdMenuClose();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('.rd-menu')) rdMenuClose(); });
+  function rdBindPress() {
+    const view = $('#rdview');
+    let t = null, sx = 0, sy = 0;
+    const cancel = () => { clearTimeout(t); t = null; };
+    view.addEventListener('touchstart', (e) => {
+      const el = e.target.closest('#rdtext [data-i]');
+      if (!el || e.touches.length !== 1) return;
+      sx = e.touches[0].clientX; sy = e.touches[0].clientY;
+      t = setTimeout(() => { t = null; R.pressed = true; rdMenu(el); if (navigator.vibrate) try { navigator.vibrate(12); } catch (er) {} }, 480);
+    }, { passive: true });
+    view.addEventListener('touchmove', (e) => { if (t && Math.hypot(e.touches[0].clientX - sx, e.touches[0].clientY - sy) > 10) cancel(); }, { passive: true });
+    view.addEventListener('touchend', cancel);
+    view.addEventListener('touchcancel', cancel);
+    view.addEventListener('contextmenu', (e) => {
+      const el = e.target.closest('#rdtext [data-i]');
+      if (!el) return;
+      e.preventDefault();
+      R.pressed = true;
+      rdMenu(el);
+    });
   }
 
   // ---------------- Vorlese-Engine ----------------
@@ -1487,6 +1609,7 @@
     if (sub) sub.textContent = t.sub;
   }
   function updateText() {
+    rdFollow();
     const box = $('#reading');
     if (!box || !state.book) return;
     const book = state.book;

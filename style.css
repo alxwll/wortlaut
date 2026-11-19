@@ -370,3 +370,21 @@ body:not(.look-young) .rs-sw.on .rs-dot { box-shadow: 0 0 0 2px var(--bg), 0 0 0
 .rs-sand { background: #EFE6D6; color: #2B2117; }
 .rs-night { background: #16181D; color: #E2DCD0; }
 .rs-auto { background: linear-gradient(135deg, #FAF7F2 50%, #16181D 50%); color: #888; }
+
+/* Mitlesen + Satz-Menü */
+.rd-text { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.rd-text .rd-cur { background: #DDF35B; color: #141414; border-radius: 3px; -webkit-box-decoration-break: clone; box-decoration-break: clone; transition: background .3s; }
+body:not(.look-young) .rd-text .rd-cur { background: #F3CF9E; color: #1C2433; }
+.rd-night .rd-text .rd-cur { background: rgba(221,243,91,.9); color: #16181D; }
+.rd-text .rd-sel { outline: 2px solid var(--rd-ink); outline-offset: 2px; border-radius: 3px; }
+.rd-text .rd-quoted { background: #C8B6FF; color: #141414; border-radius: 3px; transition: background .4s; }
+.rd-menu { position: absolute; left: 14px; right: 14px; z-index: 6; display: flex; gap: 2px; justify-content: space-between; padding: 6px; border-radius: 16px; background: #141414; color: #FAF7F2; box-shadow: 0 12px 32px rgba(0,0,0,.3); animation: pill-in .18s ease-out; }
+.rd-menu button { flex: 1; justify-content: center; white-space: nowrap; display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 12px; border: none; border-radius: 11px; background: transparent; color: inherit; font: inherit; font-size: 14px; font-weight: 700; }
+.rd-menu button svg { width: 15px; height: 15px; }
+.rd-menu button.hot { background: #DDF35B; color: #141414; }
+body:not(.look-young) .rd-menu { background: #1C2433; }
+body:not(.look-young) .rd-menu button.hot { background: #E8A35C; color: #1C2433; }
+.rd-mi { color: #DDF35B; display: flex; }
+body:not(.look-young) .rd-mi { color: #E8A35C; }
+.rd-night .rd-menu { background: #E2DCD0; color: #16181D; }
+.rd-night .rd-mi { color: #16181D; }
