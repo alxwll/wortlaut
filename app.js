@@ -1275,14 +1275,12 @@
     const hasWorker = !!workerUrl();
     app.innerHTML = `<div class="screen">
       <div class="row" style="gap:8px"><a href="#/" class="icon-btn bare" aria-label="Zurück">${I.back}</a><h1 style="font-size:26px">Einstellungen</h1></div>
-      <div class="card"><span class="label">Zugang</span><div id="me" class="col"><span class="muted">${hasWorker ? (S.code ? 'Prüfe Zugang …' : 'Noch kein Zugangscode eingetragen.') : 'In config.js ist noch keine Worker-Adresse eingetragen.'}</span></div>
-        <form id="codeform" class="field" style="background:var(--bg)"><label for="code">Zugangscode</label><input id="code" autocomplete="off" autocapitalize="off" value="${esc(S.code)}" placeholder="z. B. abcde-fghij"></form>
-        <button class="btn" data-act="savecode">Code speichern</button>
-      </div>
+      <div class="card"><span class="label">Kontingent diesen Monat</span><div id="me" class="col"><span class="muted">${hasWorker ? (S.code ? 'Prüfe Zugang …' : 'Noch kein Zugangscode – trag ihn unten unter „Zugang & Server“ ein.') : 'Noch keine Server-Adresse – unten unter „Zugang & Server“ eintragen.'}</span></div></div>
+      <div id="adminlink"></div>
       <div class="card"><span class="label">Stimme</span>
         <div class="field" style="background:var(--bg)"><label for="voice">Stimme</label><select id="voice">${voiceOptions(state.voices || DEFAULT_VOICES)}</select></div>
         <span class="small">Mehrsprachige Stimmen lesen fremdsprachige Stellen im Buch mit passender Aussprache.</span>
-        <div class="chips">${RATES.map((r) => `<button class="chip ${r === S.rate ? 'on' : ''}" data-act="setrate" data-v="${r}">${String(r).replace('.', ',')}×</button>`).join('')}</div>
+        <div class="chips tight">${RATES.map((r) => `<button class="chip ${r === S.rate ? 'on' : ''}" data-act="setrate" data-v="${r}" aria-label="Tempo ${String(r).replace('.', ',')}">${String(r).replace('.', ',')}×</button>`).join('')}</div>
         <button class="btn" data-act="testvoice">${I.playS} Probehören</button>
       </div>
       <div class="card"><span class="label">Darstellung</span>
@@ -1290,19 +1288,22 @@
         ${young() ? '<span class="small">Kräftige Farben, Player in Schwarz.</span>' : `<span class="small">Ruhig, mit Sonnen-Timer. Hell oder dunkel:</span>
         <div class="chips">${[['auto', 'Nach Sonnenstand'], ['day', 'Hell'], ['night', 'Dunkel']].map(([v, l]) => `<button class="chip ${S.theme === v ? 'on' : ''}" data-act="theme" data-v="${v}">${l}</button>`).join('')}</div>`}
       </div>
-      <details class="card"><summary class="label" style="cursor:pointer">Eigener Azure-Schlüssel (optional)</summary>
-        <p class="small" style="line-height:1.5;margin:4px 0 0">Mit eigenem Schlüssel hörst du über dein eigenes Azure-Konto statt über ein geteiltes Kontingent. Der Schlüssel bleibt auf diesem Gerät und wird nur zum Vorlesen durchgereicht.</p>
+      <details class="card" ${!S.code || !hasWorker ? 'open' : ''}><summary class="label" style="cursor:pointer">Zugang &amp; Server</summary>
+        <form id="codeform" class="col" style="gap:10px">
+          <div class="field" style="background:var(--bg)"><label for="code">Zugangscode</label>
+            <div class="row" style="gap:6px"><input id="code" type="password" autocomplete="off" autocapitalize="off" value="${esc(S.code)}" placeholder="z. B. abcde-fghij"><button type="button" class="btn link" data-act="showcode" style="height:34px">Zeigen</button></div></div>
+          <button class="btn" type="submit">Code speichern</button>
+        </form>
+        <form id="wform" class="col" style="gap:10px"><div class="field" style="background:var(--bg)"><label for="wurl">Server-Adresse (Worker)</label><input id="wurl" autocomplete="off" value="${esc(S.workerUrl)}" placeholder="${esc((window.HB_CONFIG && window.HB_CONFIG.workerUrl) || 'https://….workers.dev')}"></div>
+          <button class="btn" type="submit">Adresse speichern</button></form>
+        <span class="label" style="margin-top:6px">Eigener Azure-Schlüssel (optional)</span>
+        <p class="small" style="line-height:1.5;margin:0">Mit eigenem Schlüssel hörst du über dein eigenes Azure-Konto statt über ein geteiltes Kontingent. Der Schlüssel bleibt auf diesem Gerät und wird nur zum Vorlesen durchgereicht.</p>
         <form id="keyform" class="col" style="gap:10px">
           <div class="field" style="background:var(--bg)"><label for="okey">Schlüssel</label><input id="okey" type="password" autocomplete="off" value="${esc(S.ownKey)}"></div>
           <div class="field" style="background:var(--bg)"><label for="oreg">Region</label><input id="oreg" autocomplete="off" value="${esc(S.ownRegion)}" placeholder="westeurope"></div>
-          <div class="row"><button class="btn" type="submit">Speichern</button>${S.ownKey ? '<button class="btn link danger" type="button" data-act="clearkey">Entfernen</button>' : ''}</div>
+          <div class="row"><button class="btn" type="submit">Schlüssel speichern</button>${S.ownKey ? '<button class="btn link danger" type="button" data-act="clearkey">Entfernen</button>' : ''}</div>
         </form>
       </details>
-      <details class="card"><summary class="label" style="cursor:pointer">Server</summary>
-        <form id="wform" class="col" style="gap:10px"><div class="field" style="background:var(--bg)"><label for="wurl">Worker-Adresse</label><input id="wurl" autocomplete="off" value="${esc(S.workerUrl)}" placeholder="${esc((window.HB_CONFIG && window.HB_CONFIG.workerUrl) || 'https://….workers.dev')}"></div>
-        <button class="btn" type="submit">Speichern</button></form>
-      </details>
-      <div id="adminlink"></div>
     </div>`;
     $('#voice').addEventListener('change', (e) => { S.voice = e.target.value; saveSettings(); P.cache.clear(); });
     $('#codeform').addEventListener('submit', (e) => { e.preventDefault(); saveCode(); });
@@ -1365,7 +1366,7 @@
       } else if (limit) {
         gauge = quotaGauge(limit, [{ chars: me.usedChars, color: 'var(--accent)', label: 'Verbraucht' }]);
       }
-      box.innerHTML = `<span style="font-weight:600">${esc(me.name)}${me.paused ? ' · pausiert' : ''}</span>
+      box.innerHTML = `<span class="small">Angemeldet als ${esc(me.name)}${me.paused ? ' · pausiert' : ''}</span>
         ${gauge || `<span class="muted">Diesen Monat ${fmtHM(me.usedChars)} verbraucht</span>`}
         <span class="small">Gezählt wird alles, was bei Azure angefragt wurde – auch vorgeladene Abschnitte und Probehören.</span>
         ${S.ownKey ? '<span class="small">Gerade aktiv: dein eigener Azure-Schlüssel.</span>' : ''}`;
@@ -1544,6 +1545,7 @@
       case 'q-copy': return copyQuote(el.dataset.id);
       case 'q-more': return quoteMenu(el.dataset.id);
       case 'savecode': return saveCode();
+      case 'showcode': { const c = $('#code'); const show = c.type === 'password'; c.type = show ? 'text' : 'password'; el.textContent = show ? 'Verbergen' : 'Zeigen'; return; }
       case 'clearkey': S.ownKey = ''; saveSettings(); return render();
       case 'setrate': S.rate = parseFloat(el.dataset.v); saveSettings(); P.cache.clear(); return render();
       case 'theme': S.theme = el.dataset.v; saveSettings(); return render();

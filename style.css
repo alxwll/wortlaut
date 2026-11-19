@@ -247,3 +247,6 @@ body.look-young {
 img.cover { aspect-ratio: auto; height: auto; object-fit: contain; }
 .shelf { align-items: end; }
 .book-tile { justify-content: flex-end; }
+
+.chips.tight { flex-wrap: nowrap; gap: 6px; }
+.chips.tight .chip { min-width: 0; padding: 0 4px; font-size: 13px; }
