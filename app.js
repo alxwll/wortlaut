@@ -1625,7 +1625,7 @@
         return;
       }
       case 'more15': return beginSession(state.progress.pos, false, 15);
-      case 'findmode': S.findMode = el.dataset.v; saveSettings(); return render();
+      case 'findmode': { S.findMode = el.dataset.v; saveSettings(); const y = window.scrollY; await render(); window.scrollTo(0, y); return; }
       case 'mark': return markQuote();
       case 'jumpcur': manualAt = 0; return followCur('smooth');
       case 'mark-undo': return undoMark();
