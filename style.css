@@ -250,3 +250,19 @@ img.cover { aspect-ratio: auto; height: auto; object-fit: contain; }
 
 .chips.tight { flex-wrap: nowrap; gap: 6px; }
 .chips.tight .chip { min-width: 0; padding: 0 4px; font-size: 13px; }
+
+/* ================= Dock: Mini-Player + Navigation als eine Einheit ================= */
+.dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 15; background: var(--bg); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); transition: background .6s; }
+.dock .tabbar { position: static; height: 64px; padding: 0; border: none; background: transparent; }
+.dock .mini { position: static; margin: 8px 12px 0; max-width: 496px; box-shadow: none; }
+@media (min-width: 520px) { .dock .mini { margin: 8px auto 0; } }
+body.has-mini .screen { padding-bottom: calc(var(--navh) + 90px); }
+
+.look-young .dock { left: 50%; right: auto; transform: translateX(-50%); bottom: calc(12px + env(safe-area-inset-bottom)); padding: 6px; border: none; border-radius: 30px; background: #141414; display: flex; flex-direction: column; gap: 4px; }
+body.look-young.has-mini .dock { width: min(calc(100vw - 24px), 480px); }
+.look-young .dock .tabbar { transform: none; height: auto; padding: 0; gap: 6px; border-radius: 0; background: transparent; justify-content: center; }
+.look-young .dock .mini { margin: 0; max-width: none; border: none; box-shadow: none; border-radius: 24px; background: #232323; padding: 6px 6px 6px 8px; color: #FAF7F2; }
+.look-young .dock .mini .small { color: #B5B5B5; }
+.look-young .dock .mini .cover { border-color: #3A3A3A; }
+.look-young .dock .mini-play { background: #DDF35B; color: #141414; }
+body.look-young.has-mini .screen { padding-bottom: calc(var(--navh) + 96px); }
