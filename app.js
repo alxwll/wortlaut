@@ -330,8 +330,35 @@
     return new Promise((resolve) => {
       const ov = document.createElement('div');
       ov.className = 'overlay';
-      ov.innerHTML = `<div class="sheet" role="dialog" aria-modal="true">${html}</div>`;
-      const close = (v) => { ov.remove(); resolve(v); };
+      ov.innerHTML = `<div class="sheet" role="dialog" aria-modal="true"><div class="grabber" aria-hidden="true"></div>${html}</div>`;
+      const sh = ov.querySelector('.sheet');
+      let done = false;
+      const close = (v) => {
+        if (done) return; done = true;
+        ov.classList.add('closing');
+        sh.style.transition = 'transform .2s ease-in'; sh.style.transform = 'translateY(100%)';
+        setTimeout(() => ov.remove(), 200);
+        resolve(v);
+      };
+      // Nach unten wischen schließt das Fenster (nur wenn der Inhalt ganz oben steht)
+      let y0 = null, dy = 0, t0 = 0;
+      sh.addEventListener('touchstart', (e) => { if (sh.scrollTop > 0 || e.touches.length > 1) { y0 = null; return; } y0 = e.touches[0].clientY; dy = 0; t0 = Date.now(); sh.style.transition = 'none'; }, { passive: true });
+      sh.addEventListener('touchmove', (e) => {
+        if (y0 == null) return;
+        dy = e.touches[0].clientY - y0;
+        if (dy <= 0) { sh.style.transform = ''; if (sh.scrollTop > 0) y0 = null; return; }
+        e.preventDefault();
+        sh.style.transform = `translateY(${dy}px)`;
+        ov.style.background = `rgba(20,16,12,${Math.max(0, 0.45 - dy / 800)})`;
+      }, { passive: false });
+      sh.addEventListener('touchend', () => {
+        if (y0 == null) return;
+        y0 = null;
+        const fast = dy > 40 && dy / Math.max(1, Date.now() - t0) > 0.5;
+        if (dy > 110 || fast) return close(undefined);
+        sh.style.transition = 'transform .2s ease-out'; sh.style.transform = ''; ov.style.background = '';
+      });
+      ov.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(undefined); });
       ov.addEventListener('click', (e) => {
         if (e.target === ov) return close(undefined);
         const b = e.target.closest('[data-v]');
