@@ -1528,8 +1528,9 @@
       case 'plus10':
         return chooseTimer();
       case 'rate': {
-        const i = RATES.indexOf(S.rate);
-        S.rate = RATES[(i + 1) % RATES.length];
+        const res = await sheet(`<h2 class="label">Tempo</h2><div>${RATES.map((r) => `<button class="list-btn" data-v="${r}"><span>${String(r).replace('.', ',')}×${r === 1 ? ' · normal' : r < 1 ? ' · ruhiger' : ''}</span>${r === S.rate ? '✓' : ''}</button>`).join('')}</div>`);
+        if (res == null || parseFloat(res) === S.rate) return;
+        S.rate = parseFloat(res);
         saveSettings();
         const rl = $('#ratelbl');
         if (rl) rl.textContent = String(S.rate).replace('.', ',') + '×';
