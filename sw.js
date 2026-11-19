@@ -1,5 +1,5 @@
 // Offline-Cache für die App-Hülle. Bücher liegen in IndexedDB, Audio wird nicht gecacht.
-const VERSION = 'wortlaut-v10';
+const VERSION = 'wortlaut-v11';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'epub.js', 'config.js', 'vendor/jszip.min.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
 
 self.addEventListener('install', (e) => {

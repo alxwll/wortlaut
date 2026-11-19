@@ -126,3 +126,5 @@ body:not(.has-mini) .mini { display: none; }
   .screen.player .reading p { font-size: 17px; line-height: 1.55; }
   .screen.player .ctl.main { width: 72px; height: 72px; border-radius: 36px; }
 }
+
+.brand { display: inline-flex; align-items: center; gap: 8px; font-family: var(--serif); font-size: 16px; font-weight: 600; letter-spacing: -.01em; color: var(--text); }

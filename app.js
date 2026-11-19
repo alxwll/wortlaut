@@ -108,6 +108,8 @@
     return `<div class="cover ph ${cls}" style="background:${bg};color:${fg}">${esc(book.title)}</div>`;
   }
   const I = {
+    // Logo-Zeichen ohne Kachel: Klangbögen (Akzent) über aufgeschlagenem Buch (Textfarbe)
+    logo: '<svg width="30" height="22" viewBox="26 50 148 112" aria-hidden="true"><path d="M78 122 a22 22 0 0 1 44 0" fill="none" stroke="var(--accent)" stroke-width="10" stroke-linecap="round"/><path d="M58 122 a42 42 0 0 1 84 0" fill="none" stroke="var(--accent)" stroke-width="10" stroke-linecap="round" opacity=".6"/><path d="M38 122 a62 62 0 0 1 124 0" fill="none" stroke="var(--accent)" stroke-width="10" stroke-linecap="round" opacity=".3"/><path d="M32 140 Q66 126 100 142 Q134 126 168 140" fill="none" stroke="currentColor" stroke-width="11" stroke-linecap="round"/><path d="M36 156 Q68 143 100 158 Q132 143 164 156" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" opacity=".45"/></svg>',
     lib: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4v16M9 4v16M13.5 5l4.5 14.5"/></svg>',
     ear: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3.5" y="14" width="4" height="6" rx="1.5"/><rect x="16.5" y="14" width="4" height="6" rx="1.5"/></svg>',
     moon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>',
@@ -230,12 +232,9 @@
     const prog = Object.fromEntries((await dbAll('progress')).map((p) => [p.id, p]));
     books.sort((a, b) => ((prog[b.id] && prog[b.id].lastAt) || b.addedAt || '').localeCompare((prog[a.id] && prog[a.id].lastAt) || a.addedAt || ''));
     const recent = books.find((b) => prog[b.id] && prog[b.id].lastAt);
-    const now = new Date();
-    const dayName = now.toLocaleDateString('de-DE', { weekday: 'long' });
-    const part = isNight(now) ? 'Abend' : now.getHours() < 11 ? 'Vormittag' : now.getHours() < 14 ? 'Mittag' : 'Nachmittag';
     let html = `<div class="screen">
       <div class="between">
-        <div class="col" style="gap:2px"><span class="muted">${esc(dayName)}, ${part}</span><h1>Bibliothek</h1></div>
+        <div class="col" style="gap:6px"><span class="brand">${I.logo}<span>Wort. Laut.</span></span><h1>Bibliothek</h1></div>
         <div class="row" style="gap:8px">
           <button class="icon-btn" data-act="settings" aria-label="Einstellungen">${I.gear}</button>
           <button class="icon-btn" data-act="add" aria-label="EPUB hinzufügen">${I.plus}</button>
