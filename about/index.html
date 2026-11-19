@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Wort. Laut. – Hör dein Buch. Lies weiter.</title>
+<meta name="description" content="Wort. Laut. liest deine eigenen E-Books mit natürlicher Stimme vor – und sagt dir immer, auf welcher Seite du bist. Springe zwischen Hören und Lesen, ohne die Stelle zu verlieren.">
+<meta name="theme-color" content="#FAF7F2">
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Figtree:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+:root {
+  --bg: #FAF7F2; --ink: #141414; --muted: #5A5A5A; --card: #FFFFFF;
+  --lime: #DDF35B; --lilac: #C8B6FF; --red: #FF5B3A; --sand: #EDE7DC;
+  --dark: #141414; --dark2: #232323; --on-dark: #FAF7F2;
+  --hl: var(--lime); --hl-ink: #141414; --accent: var(--red);
+  --line: 2px solid var(--ink); --shadow: 5px 5px 0 var(--ink); --r: 18px;
+  --head: 'Bricolage Grotesque', system-ui, sans-serif; --body: 'Bricolage Grotesque', system-ui, sans-serif;
+  --read: 'Bricolage Grotesque', system-ui, sans-serif;
+  --hw: 800; --track: -0.035em;
+}
+body.calm {
+  --bg: #F1ECE4; --ink: #1C2433; --muted: #5C6475; --card: #FBF8F3;
+  --lime: #E8A35C; --lilac: #D9CFC0; --red: #C8692E; --sand: #E6DED1;
+  --dark: #1C2433; --dark2: #26304A; --on-dark: #F1ECE4;
+  --hl: #F3CF9E; --hl-ink: #1C2433; --accent: #E8A35C;
+  --line: 1px solid #D6CEC0; --shadow: 0 10px 30px rgba(28,36,51,.10); --r: 22px;
+  --head: 'Source Serif 4', Georgia, serif; --body: 'Figtree', system-ui, sans-serif; --read: 'Source Serif 4', Georgia, serif;
+  --hw: 600; --track: -0.015em;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 17px; line-height: 1.55; -webkit-font-smoothing: antialiased; transition: background .5s, color .5s; }
+body, body * { transition-property: background-color, color, border-color, box-shadow, border-radius; transition-duration: .45s; }
+a { color: inherit; }
+h1, h2, h3 { font-family: var(--head); font-weight: var(--hw); letter-spacing: var(--track); margin: 0; line-height: 1.02; }
+p { margin: 0; }
+.wrap { width: min(1120px, 100% - 40px); margin: 0 auto; }
+mark { background: var(--hl); color: var(--hl-ink); border-radius: 8px; padding: 0 .12em; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.kicker { font-size: 13px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+body.calm .kicker { font-weight: 600; color: var(--muted); }
+
+/* Kopf */
+header { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px); }
+.top { display: flex; align-items: center; justify-content: space-between; height: 68px; }
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; font-family: var(--head); font-weight: 800; font-size: 21px; letter-spacing: -0.04em; }
+body.calm .brand { font-weight: 600; letter-spacing: 0; }
+.brand .dot { color: var(--red); }
+.top-r { display: flex; gap: 10px; align-items: center; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 48px; padding: 0 22px; border-radius: 999px; border: var(--line); background: var(--card); color: var(--ink); font: 700 15px var(--body); text-decoration: none; cursor: pointer; }
+.btn.main { background: var(--lime); box-shadow: 3px 3px 0 var(--ink); }
+body.calm .btn.main { background: var(--dark); color: var(--on-dark); border-color: var(--dark); box-shadow: none; }
+.btn.sm { height: 40px; padding: 0 16px; font-size: 14px; }
+.mode { gap: 6px; }
+.mode .when-calm { display: none; }
+body.calm .mode .when-calm { display: inline; }
+body.calm .mode .when-loud { display: none; }
+
+/* Hero */
+.hero { padding: 40px 0 80px; display: grid; grid-template-columns: 1.15fr .85fr; gap: 48px; align-items: center; }
+.hero h1 { font-size: clamp(46px, 7vw, 88px); }
+.hero h1 .flip { display: inline-block; background: var(--lilac); border-radius: 14px; padding: 0 .12em; transform: rotate(-2deg); }
+body.calm .hero h1 .flip { transform: none; background: transparent; color: var(--red); font-style: italic; padding: 0; }
+.hero .lead { font-size: clamp(18px, 2vw, 21px); margin-top: 26px; max-width: 34ch; }
+.hero .cta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 30px; }
+.hero .note { margin-top: 16px; font-size: 14px; color: var(--muted); }
+
+/* Telefon-Mockups */
+.phone { width: 300px; max-width: 100%; aspect-ratio: 300 / 610; border-radius: 42px; border: 8px solid #141414; background: var(--dark); color: var(--on-dark); box-shadow: 10px 10px 0 var(--ink); overflow: hidden; display: flex; flex-direction: column; padding: 26px 20px 20px; gap: 12px; margin: 0 auto; position: relative; font-family: var(--body); }
+body.calm .phone { border-color: #10151F; box-shadow: 0 30px 60px rgba(28,36,51,.25); }
+.phone.light { background: var(--bg); color: var(--ink); }
+.ph-top { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; opacity: .8; }
+.ph-page { font-family: var(--head); font-weight: 800; font-size: 64px; line-height: .9; letter-spacing: -0.05em; color: var(--lime); }
+body.calm .ph-page { font-weight: 600; font-size: 54px; letter-spacing: -0.02em; }
+.ph-bar { height: 8px; border-radius: 4px; background: var(--dark2); overflow: hidden; }
+.ph-bar i { display: block; height: 100%; width: 62%; background: var(--lime); border-radius: 4px; animation: fill 30s linear infinite; }
+@keyframes fill { from { width: 62%; } to { width: 4%; } }
+.sun { display: none; }
+body.calm .sun { display: block; }
+body.calm .ph-bar { display: none; }
+.ph-read { flex: 1; font-family: var(--read); font-size: 15px; line-height: 1.55; overflow: hidden; color: color-mix(in srgb, var(--on-dark) 55%, transparent); -webkit-mask-image: linear-gradient(transparent, #000 18%, #000 80%, transparent); mask-image: linear-gradient(transparent, #000 18%, #000 80%, transparent); padding-top: 14px; }
+.ph-read .cur { color: var(--hl-ink); background: var(--hl); border-radius: 5px; padding: 0 2px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.ph-ctrl { display: flex; align-items: center; justify-content: center; gap: 26px; }
+.ph-ctrl .play { width: 64px; height: 64px; border-radius: 32px; background: var(--lime); color: #141414; display: flex; align-items: center; justify-content: center; }
+.ph-chips { display: flex; gap: 8px; justify-content: center; font-size: 13px; }
+.ph-chips span { border: 1.5px solid #3A3A3A; border-radius: 999px; padding: 5px 12px; }
+
+/* Abschnitte */
+section { padding: 90px 0; }
+.sec-head { max-width: 760px; margin-bottom: 44px; }
+.sec-head h2 { font-size: clamp(38px, 5.6vw, 68px); margin-top: 10px; }
+.sec-head p { margin-top: 18px; font-size: 19px; color: var(--muted); max-width: 56ch; }
+.dark { background: var(--dark); color: var(--on-dark); }
+.dark .sec-head p { color: color-mix(in srgb, var(--on-dark) 70%, transparent); }
+
+/* Die Geschichte: Spurwechsel */
+.lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 0 28px; position: relative; }
+.lane-h { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 15px; letter-spacing: .08em; text-transform: uppercase; padding-bottom: 18px; }
+.lane-h .tag { width: 38px; height: 38px; border-radius: 19px; display: flex; align-items: center; justify-content: center; border: var(--line); }
+.lane-h.l .tag { background: var(--lime); color: #141414; }
+.lane-h.r .tag { background: var(--lilac); color: #141414; }
+.step { grid-column: 1; background: var(--card); border: var(--line); border-radius: var(--r); box-shadow: var(--shadow); padding: 22px 24px; margin-bottom: 26px; position: relative; color: var(--ink); }
+.step.r { grid-column: 2; }
+.step .time { font-family: var(--head); font-weight: 800; font-size: 34px; letter-spacing: -0.04em; line-height: 1; }
+body.calm .step .time { font-weight: 600; }
+.step .where { font-weight: 700; margin: 6px 0 10px; }
+.step .pg { display: inline-flex; align-items: center; gap: 6px; margin-top: 14px; font-weight: 800; font-size: 14px; border-radius: 999px; padding: 6px 12px; background: var(--hl); color: var(--hl-ink); }
+.step.r .pg { background: var(--lilac); color: #141414; }
+body.calm .step.r .pg { color: var(--ink); }
+.switch-arrow { grid-column: 1 / -1; display: flex; justify-content: center; margin: -8px 0 18px; }
+.switch-arrow span { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; background: var(--dark2); color: var(--on-dark); border: 1.5px dashed color-mix(in srgb, var(--on-dark) 35%, transparent); border-radius: 999px; padding: 8px 16px; text-align: center; }
+
+/* Rein / raus */
+.duo { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.panel { background: var(--card); color: var(--ink); border: var(--line); border-radius: var(--r); box-shadow: var(--shadow); padding: 30px; display: flex; flex-direction: column; gap: 18px; }
+.panel h3 { font-size: 34px; }
+.panel.lilac { background: var(--lilac); }
+body.calm .panel.lilac { background: var(--card); }
+.seg { display: flex; gap: 4px; background: var(--sand); border-radius: 999px; padding: 4px; }
+.seg span { flex: 1; text-align: center; height: 40px; line-height: 40px; border-radius: 999px; font-weight: 700; font-size: 15px; cursor: pointer; user-select: none; }
+.seg span.on { background: var(--dark); color: var(--lime); }
+body.calm .seg span.on { color: var(--on-dark); }
+.find-demo { min-height: 132px; display: flex; flex-direction: column; gap: 12px; }
+.fake-input { border: var(--line); border-radius: 14px; background: var(--card); padding: 12px 16px; font-size: 18px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+.fake-input .caret { display: inline-block; width: 2px; height: 1.1em; background: var(--ink); vertical-align: -3px; animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.startline { display: flex; gap: 10px; font-size: 15px; line-height: 1.45; color: var(--muted); }
+.startline b { color: var(--ink); }
+.pdot { width: 24px; height: 24px; flex: none; border-radius: 12px; background: var(--dark); color: var(--lime); display: flex; align-items: center; justify-content: center; margin-top: 1px; }
+body.calm .pdot { color: var(--on-dark); }
+.stopcard { background: var(--card); border: var(--line); border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 8px; }
+.stopcard .big { font-family: var(--head); font-weight: 800; font-size: 56px; letter-spacing: -0.05em; line-height: .95; }
+body.calm .stopcard .big { font-weight: 600; letter-spacing: -0.02em; }
+.stopcard q { font-family: var(--read); font-size: 17px; quotes: '„' '“'; }
+.ticks { display: flex; flex-direction: column; gap: 10px; padding: 0; margin: 0; list-style: none; }
+.ticks li { display: flex; gap: 10px; align-items: flex-start; }
+.ticks li::before { content: ''; flex: none; width: 10px; height: 10px; border-radius: 5px; background: var(--red); margin-top: 8px; }
+
+/* Zitate */
+.cards { display: flex; justify-content: center; gap: 22px; flex-wrap: wrap; padding: 10px 0 20px; }
+.qcard { width: 220px; aspect-ratio: 9 / 16; border-radius: 18px; padding: 20px 18px; display: flex; flex-direction: column; justify-content: space-between; color: #141414; font-family: 'Bricolage Grotesque', sans-serif; box-shadow: 6px 6px 0 rgba(0,0,0,.85); }
+.qcard:nth-child(1) { transform: rotate(-4deg); background: #C8B6FF; }
+.qcard:nth-child(2) { transform: translateY(-14px); background: #141414; color: #FAF7F2; outline: 2px solid #3A3A3A; }
+.qcard:nth-child(3) { transform: rotate(4deg); background: #FF5B3A; }
+.qcard .qm { font-size: 64px; font-weight: 800; line-height: .6; height: 34px; }
+.qcard p { font-size: 19px; font-weight: 800; line-height: 1.18; letter-spacing: -0.03em; }
+.qcard .hl { background: #DDF35B; color: #141414; border-radius: 5px; padding: 0 3px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.qcard .alt { color: #DDF35B; }
+.qcard .src { display: flex; justify-content: space-between; align-items: flex-end; font-size: 11px; }
+.qcard .src b { display: block; font-size: 13px; }
+.qcard .lbl { font-weight: 800; }
+body.calm .qcard { font-family: 'Source Serif 4', serif; box-shadow: 0 20px 40px rgba(0,0,0,.25); }
+body.calm .qcard:nth-child(1) { background: #F1ECE4; }
+body.calm .qcard:nth-child(2) { background: #1C2433; outline-color: #3A4560; }
+body.calm .qcard:nth-child(3) { background: #E8A35C; }
+body.calm .qcard p { font-weight: 600; letter-spacing: 0; }
+body.calm .qcard .hl { background: #F3CF9E; color: #1C2433; }
+body.calm .qcard .alt { color: #E8A35C; }
+.styles-row { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+.styles-row span { border: 1.5px solid #3A3A3A; border-radius: 999px; padding: 6px 14px; font-size: 14px; font-weight: 700; }
+
+.calm-only { display: none; }
+body.calm .calm-only { display: flex; }
+body.calm .loud-only { display: none; }
+
+/* Features */
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.feat { background: var(--card); color: var(--ink); border: var(--line); border-radius: var(--r); padding: 26px; display: flex; flex-direction: column; gap: 10px; }
+.feat .ic { width: 46px; height: 46px; border-radius: 14px; background: var(--dark); color: var(--lime); display: flex; align-items: center; justify-content: center; }
+body.calm .feat .ic { background: var(--sand); color: var(--red); }
+.feat h3 { font-size: 24px; }
+.feat p { color: var(--muted); font-size: 16px; }
+
+/* Laut / leise */
+.looks { display: grid; grid-template-columns: 1fr auto; gap: 40px; align-items: center; background: var(--lilac); border: var(--line); border-radius: 28px; box-shadow: var(--shadow); padding: 46px; color: #141414; }
+body.calm .looks { background: var(--card); color: var(--ink); }
+.looks h2 { font-size: clamp(36px, 5vw, 60px); }
+.looks p { margin-top: 14px; font-size: 18px; max-width: 46ch; }
+.bigswitch { width: 180px; height: 92px; border-radius: 46px; border: 3px solid #141414; background: #141414; position: relative; cursor: pointer; padding: 0; }
+.bigswitch .knob { position: absolute; top: 8px; left: 8px; width: 70px; height: 70px; border-radius: 35px; background: #DDF35B; display: flex; align-items: center; justify-content: center; transition: left .45s cubic-bezier(.5,1.6,.4,1), background .45s; color: #141414; }
+body.calm .bigswitch { background: #E6DED1; border-color: #1C2433; }
+body.calm .bigswitch .knob { left: 96px; background: #1C2433; color: #F3CF9E; }
+.bigswitch .k-calm { display: none; }
+body.calm .bigswitch .k-calm { display: block; }
+body.calm .bigswitch .k-loud { display: none; }
+.switch-cap { text-align: center; font-weight: 700; margin-top: 10px; font-size: 14px; }
+
+/* Schluss */
+.final { text-align: center; padding: 110px 0 120px; }
+.final h2 { font-size: clamp(44px, 7.5vw, 96px); }
+.final p { margin: 22px auto 0; max-width: 46ch; font-size: 19px; color: var(--muted); }
+.final .cta { display: flex; justify-content: center; gap: 12px; margin-top: 34px; flex-wrap: wrap; }
+footer { border-top: var(--line); padding: 28px 0 40px; font-size: 14px; color: var(--muted); }
+footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+
+/* Einblenden beim Scrollen */
+.rv { opacity: 0; transform: translateY(24px); transition: opacity .7s ease, transform .7s ease; }
+.rv.in { opacity: 1; transform: none; }
+
+@media (max-width: 860px) {
+  .hero { grid-template-columns: 1fr; padding-top: 20px; }
+  .lanes { grid-template-columns: 1fr; }
+  .step, .step.r { grid-column: 1; }
+  .step.r { margin-left: 28px; }
+  .step:not(.r) { margin-right: 28px; }
+  .lane-h { display: none; }
+  .step::before { content: attr(data-mode); position: absolute; top: -12px; right: 18px; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; background: var(--lime); color: #141414; border: var(--line); border-radius: 999px; padding: 2px 10px; }
+  .step.r::before { background: var(--lilac); }
+  .duo, .grid3 { grid-template-columns: 1fr; }
+  .looks { grid-template-columns: 1fr; padding: 30px; justify-items: center; text-align: left; }
+  .top-r .btn.main { display: none; }
+  section { padding: 70px 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .rv { opacity: 1; transform: none; transition: none; }
+  .ph-bar i, .fake-input .caret { animation: none; }
+  body, body * { transition: none !important; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap top">
+    <a class="brand" href="#top" aria-label="Wort. Laut. – nach oben">
+      <svg width="34" height="34" viewBox="0 0 200 200" aria-hidden="true"><rect width="200" height="200" rx="46" fill="#141414"/><g transform="translate(7 3)"><path d="M37.1 123.0 22.0 60.7H41.8L49.5 108.1H51.9L61.4 60.7H84.0L93.9 108.1H96.4L103.7 60.7H123.1L108.0 123.0H81.8L73.2 76.0H71.0L63.0 123.0Z" fill="#DDF35B"/><path d="M151.1 99.2 A18 18 0 0 1 151.1 126.8" fill="none" stroke="#FF5B3A" stroke-width="7" stroke-linecap="round"/><path d="M158.1 90.8 A29 29 0 0 1 158.1 135.2" fill="none" stroke="#FF5B3A" stroke-width="7" stroke-linecap="round" opacity=".5"/><circle cx="139.5" cy="113" r="10" fill="#FF5B3A"/></g></svg>
+      <span>wort<span class="dot">.</span>laut<span class="dot">.</span></span>
+    </a>
+    <div class="top-r">
+      <button class="btn sm mode" data-toggle aria-pressed="false"><span class="when-loud">☾ Ruhiger</span><span class="when-calm">⚡ Lauter</span></button>
+      <a class="btn sm main" href="../">App öffnen</a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+  <div class="wrap hero">
+    <div>
+      <span class="kicker">Deine E-Books, vorgelesen</span>
+      <h1 style="margin-top:14px">Hör weiter.<br>Lies <span class="flip">weiter.</span><br>Ganz egal wo.</h1>
+      <p class="lead">Wort. Laut. liest deine eigenen Bücher mit natürlicher Stimme vor – und sagt dir immer, <b>auf welcher Seite</b> du gerade bist. So springst du zwischen Kopfhörer, E-Reader und Hardcover, ohne die Stelle zu verlieren.</p>
+      <div class="cta"><a class="btn main" href="../">App öffnen</a><a class="btn" href="#story">So funktioniert's ↓</a></div>
+      <p class="note">Läuft im Browser und lässt sich wie eine App aufs Handy legen. Zugang per Einladung.</p>
+    </div>
+    <div class="phone" role="img" aria-label="Der Player von Wort. Laut.: große Seitenzahl, Timer und der mitlaufende Text">
+      <div class="ph-top"><span>Nordwind</span><span>52 %</span></div>
+      <div class="ph-page">S.149</div>
+      <div class="ph-bar"><i></i></div>
+      <svg class="sun" viewBox="0 0 260 80" aria-hidden="true"><path d="M20 76 A110 110 0 0 1 240 76" fill="none" stroke="currentColor" stroke-opacity=".25" stroke-width="1.5" stroke-dasharray="3 5"/><path d="M20 76 A110 110 0 0 1 88 18" fill="none" stroke="#E8A35C" stroke-width="2"/><circle cx="88" cy="18" r="9" fill="#E8A35C"/><line x1="8" y1="76" x2="252" y2="76" stroke="currentColor" stroke-opacity=".3"/></svg>
+      <div class="ph-read">Der Wind kam vom Wasser herauf und roch nach Salz und Diesel. Mara blieb am Ende des Stegs stehen und zog die Jacke enger. <span class="cur">Irgendwo hinter ihr schlug eine Tür, zweimal, dann war es still.</span> Sie zählte bis zehn, dann bis zwanzig. Niemand kam.</div>
+      <div class="ph-chips"><span>☾ 23 min</span><span>1,1×</span><span>♥</span></div>
+      <div class="ph-ctrl"><span aria-hidden="true">⏮</span><span class="play"><svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6.5" y="5" width="4" height="14" rx="1.2"/><rect x="13.5" y="5" width="4" height="14" rx="1.2"/></svg></span><span aria-hidden="true">⏭</span></div>
+    </div>
+  </div>
+
+  <section id="story" class="dark">
+    <div class="wrap">
+      <div class="sec-head rv">
+        <span class="kicker" style="color:var(--lime)">Ein Tag, ein Buch</span>
+        <h2>Ein Buch.<br>Zwei Wege rein.</h2>
+        <p>Manchmal hast du die Hände frei, manchmal die Ohren. Wort. Laut. sorgt dafür, dass du dein Buch einfach mitnimmst – vom Hören ins Lesen und wieder zurück.</p>
+      </div>
+      <div class="lanes">
+        <div class="lane-h l"><span class="tag">🎧</span>Hören</div>
+        <div class="lane-h r"><span class="tag">📖</span>Lesen</div>
+
+        <article class="step rv" data-mode="Hören">
+          <div class="time">07:10</div>
+          <div class="where">Laufrunde am Fluss</div>
+          <p>Kapitel 4 auf den Ohren. Sleep-Timer auf 30 Minuten – genau eine Runde.</p>
+          <span class="pg">▶ ab S. 131</span>
+        </article>
+        <div class="switch-arrow rv"><span>Timer läuft ab – der Satz wird noch zu Ende gelesen</span></div>
+        <article class="step r rv" data-mode="Lesen">
+          <div class="time">07:52</div>
+          <div class="where">S-Bahn, E-Reader</div>
+          <p>Die App hat sich gemerkt: <b>S. 149</b>, letzter Satz „… dann war es still.“ E-Reader auf, Seite 149, weiterlesen.</p>
+          <span class="pg">📖 S. 149 → 171</span>
+        </article>
+        <div class="switch-arrow rv"><span>Abends, das Hardcover auf dem Nachttisch</span></div>
+        <article class="step r rv" data-mode="Lesen">
+          <div class="time">22:40</div>
+          <div class="where">Im Bett, Hardcover</div>
+          <p>Noch drei Seiten, dann werden die Augen schwer. Du tippst vier Wörter vom Seitenanfang in die App.</p>
+          <span class="pg">„Am nächsten Morgen lag …“</span>
+        </article>
+        <article class="step rv" data-mode="Hören">
+          <div class="time">22:44</div>
+          <div class="where">Licht aus</div>
+          <p>Die Stimme setzt genau dort ein. Timer bis Kapitelende, die Lautstärke blendet sanft aus.</p>
+          <span class="pg">▶ ab S. 174</span>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="sec-head rv">
+        <span class="kicker">Die Seite reist mit</span>
+        <h2>Rein ins Buch.<br><mark>Raus</mark>, ohne dich zu verlieren.</h2>
+      </div>
+      <div class="duo">
+        <div class="panel rv">
+          <span class="kicker">Rein</span>
+          <h3>Starte, wo du gerade bist.</h3>
+          <p>Seitenzahl aus dem Buch eintippen, ein paar Wörter suchen oder ein Kapitel wählen. Die App zeigt dir den ersten Satz, bevor es losgeht.</p>
+          <div class="seg" role="tablist" aria-label="Beispiel: Stelle finden">
+            <span role="tab" data-find="seite" class="on" aria-selected="true">Seite</span><span role="tab" data-find="woerter" aria-selected="false">Wörter</span><span role="tab" data-find="kapitel" aria-selected="false">Kapitel</span>
+          </div>
+          <div class="find-demo" aria-live="polite"></div>
+        </div>
+        <div class="panel lilac rv">
+          <span class="kicker">Raus</span>
+          <h3>Hör auf, wann du willst.</h3>
+          <div class="stopcard">
+            <span class="kicker" style="color:var(--muted)">Weiterlesen auf</span>
+            <span class="big">S. 149</span>
+            <q>Irgendwo hinter ihr schlug eine Tür, zweimal, dann war es still.</q>
+          </div>
+          <ul class="ticks">
+            <li>Der Sleep-Timer liest den Satz noch zu Ende und blendet die Stimme langsam aus.</li>
+            <li>Danach siehst du die Seite und den letzten Satz – für dein E-Book oder das gedruckte Buch.</li>
+            <li>Seitenzahlen passend zur gedruckten Ausgabe, wenn der Verlag sie mitliefert. Sonst gut geschätzt.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="dark">
+    <div class="wrap">
+      <div class="sec-head rv">
+        <span class="kicker" style="color:var(--lime)">Das war gut</span>
+        <h2>Ein Satz bleibt hängen?<br>Merk ihn dir. Teil ihn.</h2>
+        <p>Beim Hören einmal aufs Herz tippen – die App merkt sich den Satz und den davor. Tipp auf weitere Sätze im Text, um das Zitat zu verlängern. Später wird daraus eine Story-Karte für Instagram oder WhatsApp.</p>
+      </div>
+      <div class="cards rv" aria-label="Drei Beispiel-Karten in verschiedenen Stilen">
+        <div class="qcard"><span class="qm">“</span><p>Mara blieb am Ende des Stegs stehen. <span class="hl">Irgendwo schlug eine Tür, zweimal, dann war es still.</span></p><div class="src"><span><b>Nordwind</b>S. 149</span><span class="lbl">Akzent</span></div></div>
+        <div class="qcard"><span class="qm">“</span><p>Man kann einen Ort verlassen, <span class="alt">ohne dass er einen verlässt.</span></p><div class="src"><span><b>Nordwind</b>S. 141</span><span class="lbl">Zweifarbig</span></div></div>
+        <div class="qcard"><span class="qm">“</span><p><span class="hl">Schweigen ist auch eine Antwort, nur eine, die man sich selbst übersetzen muss.</span></p><div class="src"><span><b>Nordwind</b>S. 98</span><span class="lbl">Markiert</span></div></div>
+      </div>
+      <div class="styles-row loud-only"><span>Flieder</span><span>Limette</span><span>Orange-Rot</span><span>Creme</span><span>Schwarz</span></div><div class="styles-row calm-only"><span>Nacht</span><span>Sand</span><span>Abendrot</span></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="sec-head rv">
+        <span class="kicker">Was noch drin ist</span>
+        <h2>Klingt nach Buch.<br>Nicht nach Navi.</h2>
+      </div>
+      <div class="grid3">
+        <div class="feat rv"><span class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4"/></svg></span><h3>Natürliche Stimmen</h3><p>Neuronale Stimmen, die Pausen machen, Absätze atmen lassen und fremdsprachige Passagen richtig aussprechen. Tempo von 0,85× bis 1,3×.</p></div>
+        <div class="feat rv"><span class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4v16M9 4v16M13.5 5l4.5 14.5"/></svg></span><h3>Deine Bibliothek</h3><p>EPUB rein, Cover und Titel kommen automatisch. Jedes Buch merkt sich seine Stelle, du siehst auf einen Blick, wie weit du bist.</p></div>
+        <div class="feat rv"><span class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span><h3>Bleibt bei dir</h3><p>Deine Bücher liegen nur auf deinem Gerät. Zum Vorlesen geht immer nur der Abschnitt raus, der gerade dran ist.</p></div>
+        <div class="feat rv"><span class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg></span><h3>Sleep-Timer</h3><p>15, 30, 60 Minuten oder bis zum Kapitelende. Nie mitten im Satz – und mit sanftem Ausblenden.</p></div>
+        <div class="feat rv"><span class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></span><h3>Wie ein Musikplayer</h3><p>Play, Pause, Satz vor oder zurück. Läuft im Hintergrund weiter und lässt sich vom Sperrbildschirm steuern.</p></div>
+        <div class="feat rv"><span class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 4.5a3.5 3.5 0 0 1 0 7M21 20c0-2.6-1.6-4.8-4-5.6"/></svg></span><h3>Für Familie & Freunde</h3><p>Per Einladungslink mit eigenem Monatskontingent – oder mit eigenem Schlüssel für die Stimme.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section style="padding-top:20px">
+    <div class="wrap">
+      <div class="looks rv">
+        <div>
+          <span class="kicker">Laut oder leise</span>
+          <h2>Zu laut für<br>23 Uhr?</h2>
+          <p>Wort. Laut. hat zwei Gesichter: <b>Jung & mutig</b> mit Limette und klaren Kanten – und <b>Dämmerung</b>, ruhig in Sand und Nachtblau, mit dem Timer als untergehender Sonne. Probier's aus: Der Schalter dreht diese ganze Seite um.</p>
+        </div>
+        <div>
+          <button class="bigswitch" data-toggle aria-pressed="false" aria-label="Ruhigen Look ein- oder ausschalten"><span class="knob"><span class="k-loud" aria-hidden="true">⚡</span><span class="k-calm" aria-hidden="true">☾</span></span></button>
+          <div class="switch-cap"><span class="when-loud-t">Jung & mutig</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="final">
+    <div class="wrap rv">
+      <h2>Dein nächstes Kapitel<br>wartet. <mark>Wort. Laut.</mark></h2>
+      <p>Öffne die App, lade ein EPUB und hör rein. Den Zugangscode bekommst du per Einladungslink.</p>
+      <div class="cta"><a class="btn main" href="../">App öffnen</a></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap"><span>Wort. Laut. – ein Liebhaberprojekt aus Stuttgart.</span><span>Für eigene, DRM-freie EPUBs.</span></div>
+</footer>
+
+<script>
+(function () {
+  // Laut / leise: ganze Seite umschalten, Wahl merken
+  const body = document.body;
+  const cap = document.querySelector('.when-loud-t');
+  const meta = document.querySelector('meta[name="theme-color"]');
+  const set = (calm) => {
+    body.classList.toggle('calm', calm);
+    document.querySelectorAll('[data-toggle]').forEach((b) => b.setAttribute('aria-pressed', String(calm)));
+    if (cap) cap.textContent = calm ? 'Dämmerung' : 'Jung & mutig';
+    if (meta) meta.setAttribute('content', calm ? '#F1ECE4' : '#FAF7F2');
+    try { localStorage.setItem('wortlaut.about.calm', calm ? '1' : '0'); } catch (e) {}
+  };
+  let saved = false;
+  try { saved = localStorage.getItem('wortlaut.about.calm') === '1'; } catch (e) {}
+  set(saved);
+  document.querySelectorAll('[data-toggle]').forEach((b) => b.addEventListener('click', () => set(!body.classList.contains('calm'))));
+
+  // Stelle finden: kleine Live-Demo
+  const demo = document.querySelector('.find-demo');
+  const play = '<span class="pdot"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l13-7.5z"/></svg></span>';
+  const views = {
+    seite: '<div class="fake-input"><span>Seite <b>149</b><span class="caret"></span></span><span style="color:var(--muted);font-size:14px">von 288</span></div><div class="startline">' + play + '<span><b>Beginnt auf S. 149 mit:</b> „Mara blieb am Ende des Stegs stehen …“</span></div>',
+    woerter: '<div class="fake-input"><span>schlug eine Tür zweimal<span class="caret"></span></span></div><div class="startline">' + play + '<span><b>Gefunden auf S. 149:</b> „Irgendwo hinter ihr <b>schlug eine Tür, zweimal</b>, dann war es still.“</span></div>',
+    kapitel: '<div class="fake-input" style="font-size:16px"><span>4 · Am Ende des Stegs</span><span>›</span></div><div class="startline">' + play + '<span><b>Beginnt auf S. 131 mit:</b> „Der Wind kam vom Wasser herauf …“</span></div>',
+  };
+  const tabs = document.querySelectorAll('[data-find]');
+  const show = (k) => {
+    tabs.forEach((t) => { const on = t.dataset.find === k; t.classList.toggle('on', on); t.setAttribute('aria-selected', String(on)); });
+    demo.innerHTML = views[k];
+  };
+  tabs.forEach((t) => t.addEventListener('click', () => show(t.dataset.find)));
+  show('seite');
+
+  // Abschnitte beim Scrollen einblenden
+  const els = document.querySelectorAll('.rv');
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { threshold: 0.15 });
+    els.forEach((el) => io.observe(el));
+  } else els.forEach((el) => el.classList.add('in'));
+})();
+</script>
+</body>
+</html>
