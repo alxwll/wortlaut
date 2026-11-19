@@ -553,7 +553,7 @@
   // ---------------- Reader: selbst weiterlesen ----------------
   // Teilt sich das Lesezeichen mit dem Player (state.progress.pos): Lesen und Hören setzen an derselben Stelle an.
   const RD_SIZES = [16, 18, 20, 22, 25];
-  const RD_FONTS = [['serif', 'Buch', "Literata, Georgia, serif"], ['sans', 'Klar', 'Figtree, system-ui, sans-serif'], ['easy', 'Leicht', "'Atkinson Hyperlegible', Verdana, sans-serif"]];
+  const RD_FONTS = [['serif', 'Buch', "Literata, Georgia, serif"], ['sans', 'Klar', "'Source Sans 3', system-ui, sans-serif"], ['easy', 'Luftig', "Lexend, Verdana, sans-serif"]];
   const RD_BGS = [['paper', 'Papier'], ['sand', 'Sand'], ['night', 'Nacht'], ['auto', 'Auto']];
   const RD_PAD = 28;
   const rd = () => Object.assign({ font: 'serif', size: 2, bg: 'auto', mode: 'page' }, S.reader || {});
