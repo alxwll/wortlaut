@@ -280,7 +280,7 @@
         const p = prog[b.id];
         const pct = p && p.lastAt ? E.percentOf(b, p.pos) : null;
         return `<button class="book-tile" data-act="open" data-id="${esc(b.id)}" aria-label="${esc(b.title)} öffnen">${coverHtml(b)}<span class="small">${pct == null ? 'Neu' : pct + ' %'}</span></button>`;
-      }).join('')}<button class="add-tile" data-act="add">${I.plus}EPUB laden</button></div>`;
+      }).join('')}<div class="book-tile"><button class="add-tile" data-act="add">${I.plus}EPUB laden</button><span class="small" aria-hidden="true">&nbsp;</span></div></div>`;
     }
     html += `</div>`;
     if (!hasCloudVoice()) html += `<div class="banner">Noch ohne Vorlesestimme aus der Cloud – es liest die einfache Handy-Stimme. <a href="#/settings">Zugang eintragen</a></div>`;
