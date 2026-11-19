@@ -893,6 +893,7 @@
     P.lastQuoteAt = Date.now();
     await saveQuote(q);
     updatePlayerUi();
+    markSpans();
     showMarkbar();
   }
   async function undoMark() {
@@ -1057,31 +1058,64 @@
     // Stopp-Kasten zuerst setzen, damit die Texthöhe stimmt, bevor der Satz ausgerichtet wird
     const sb = $('#stopbox');
     if (sb) sb.innerHTML = !P.playing ? stopBoxHtml() : '';
-    // Großzügig Kontext laden – der Bereich ist fest, überstehender Text wird weich ausgeblendet
-    let lo = i, hi = i, n = 0;
-    while (lo > 0 && n < 500) { lo--; n += T(book.sentences[lo]).length; }
-    n = 0;
-    while (hi < book.sentences.length - 1 && n < 900) { hi++; n += T(book.sentences[hi]).length; }
-    const marked = (k) => (state.quoteList || []).some((q) => q.bookId === book.id && k >= q.from && k <= q.to);
-    let html = '';
-    for (let k = lo; k <= hi; k++) {
-      const cls = (k === i ? 'cur' : '') + (marked(k) ? ' q' : '');
-      html += `<span data-i="${k}" class="${cls.trim()}">${esc(T(book.sentences[k]))}</span> `;
+    // Scrollbares Textfenster: einmal einen größeren Ausschnitt aufbauen und nur bei Bedarf nachladen
+    const win = state.textWin;
+    const fresh = !win || win.bookId !== book.id || !box.querySelector('p') || i < win.lo + 4 || i > win.hi - 6;
+    if (fresh) {
+      // Nicht neu aufbauen, während jemand gerade selbst scrollt (sonst springt der Text weg)
+      if (win && win.bookId === book.id && isManualScroll() && box.querySelector('p')) { markSpans(); return; }
+      const lo = Math.max(0, i - 40), hi = Math.min(book.sentences.length - 1, i + 80);
+      let html = '';
+      for (let k = lo; k <= hi; k++) html += `<span data-i="${k}">${esc(T(book.sentences[k]))}</span> `;
+      box.innerHTML = `<p>${html}</p>`;
+      state.textWin = { bookId: book.id, lo, hi };
     }
-    box.innerHTML = `<p>${html}</p>`;
-    anchorText();
+    markSpans();
+    followCur(fresh ? 'auto' : 'smooth');
     const pg = $('#pagelbl');
     if (pg) pg.textContent = `${book.title} · ${pageLabel(book, i)}`;
   }
-  // Der aktuelle Satz beginnt immer auf derselben Höhe (gut ein Drittel von oben) – nichts springt
-  function anchorText() {
+  // Aktuellen Satz und gemerkte Zitate im Textfenster kennzeichnen
+  function markSpans() {
+    const box = $('#reading');
+    if (!box || !state.book) return;
+    const book = state.book;
+    const qs = (state.quoteList || []).filter((q) => q.bookId === book.id);
+    box.querySelectorAll('span[data-i]').forEach((sp) => {
+      const k = +sp.dataset.i;
+      sp.classList.toggle('cur', k === P.idx);
+      sp.classList.toggle('q', qs.some((q) => k >= q.from && k <= q.to));
+    });
+  }
+  // Selbst scrollen pausiert das Mitlaufen für ein paar Sekunden
+  const FOLLOW_PAUSE_MS = 8000;
+  let manualAt = 0;
+  const isManualScroll = () => Date.now() - manualAt < FOLLOW_PAUSE_MS;
+  function followCur(behavior) {
     const box = $('#reading');
     if (!box) return;
-    const p = box.querySelector('p'), cur = box.querySelector('.cur');
-    if (!p || !cur) return;
-    const y = Math.round(box.clientHeight * 0.34 - cur.offsetTop);
-    p.style.transform = `translateY(${y}px)`;
+    const cur = box.querySelector('.cur');
+    const jb = $('#jumpcur');
+    if (isManualScroll()) {
+      if (jb) jb.hidden = !cur || Math.abs(box.scrollTop - (cur.offsetTop - box.clientHeight * 0.34)) < 40;
+      return;
+    }
+    if (jb) jb.hidden = true;
+    if (!cur) return;
+    const top = Math.max(0, cur.offsetTop - box.clientHeight * 0.34);
+    if (typeof box.scrollTo === 'function') box.scrollTo({ top, behavior: behavior || 'smooth' });
+    else box.scrollTop = top;
   }
+  function anchorText() { followCur('auto'); }
+  ['touchstart', 'wheel', 'pointerdown'].forEach((ev) => document.addEventListener(ev, (e) => {
+    if (e.target.closest && e.target.closest('#reading') && !e.target.closest('#jumpcur')) {
+      manualAt = Date.now();
+      const jb = $('#jumpcur');
+      if (jb) jb.hidden = false;
+      clearTimeout(followCur.t);
+      followCur.t = setTimeout(() => { if (!isManualScroll()) followCur('smooth'); }, FOLLOW_PAUSE_MS + 100);
+    }
+  }, { passive: true }));
   window.addEventListener('resize', anchorText);
   function stopBoxHtml() {
     return `<div class="stop-box"><span class="col" style="gap:2px"><span class="small">Gestoppt bei</span><span class="serif" style="font-size:20px;font-weight:600">${pageLabel(state.book, P.idx)}</span></span>
@@ -1127,7 +1161,8 @@
       ${P.engine === 'device' ? `<div class="banner">Vorschau mit Handy-Stimme. Für die natürliche Stimme <a href="#/settings">Zugang eintragen</a>.</div>` : ''}
       <div class="col" style="align-items:center;gap:6px"><div class="sun-wrap" id="sun"></div><span class="muted" id="sunsub" style="text-align:center"></span></div>
       <div id="perr"></div>
-      <div class="reading" id="reading" aria-live="off"></div>
+      <div class="reading-wrap"><div class="reading" id="reading" aria-live="off"></div>
+        <button class="jumpcur" id="jumpcur" data-act="jumpcur" hidden>${I.down} Zur aktuellen Stelle</button></div>
       <div id="markbar"></div>
       <div id="stopbox"></div>
       <div class="controls">
@@ -1442,6 +1477,7 @@
       case 'more15': return beginSession(state.progress.pos, false, 15);
       case 'findmode': S.findMode = el.dataset.v; saveSettings(); return render();
       case 'mark': return markQuote();
+      case 'jumpcur': manualAt = 0; return followCur('smooth');
       case 'mark-undo': return undoMark();
       case 'q-share': return shareQuote(el.dataset.id);
       case 'q-copy': return copyQuote(el.dataset.id);
