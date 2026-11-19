@@ -847,20 +847,31 @@
     if (!box || !state.book) return;
     const book = state.book;
     const i = P.idx;
-    const before = [];
-    let n = 0;
-    for (let k = i - 1; k >= 0 && n < 160; k--) { before.unshift(T(book.sentences[k])); n += T(book.sentences[k]).length; }
-    const after = [];
-    n = 0;
-    for (let k = i + 1; k < book.sentences.length && n < 260; k++) { after.push(T(book.sentences[k])); n += T(book.sentences[k]).length; }
-    let beforeTxt = before.join(' ');
-    if (beforeTxt.length > 160) beforeTxt = '… ' + beforeTxt.slice(-160).replace(/^\S*\s/, '');
-    box.innerHTML = `<p>${esc(beforeTxt)} <span class="cur">${esc(T(book.sentences[i]))}</span> ${esc(after.join(' '))}</p>`;
-    const pg = $('#pagelbl');
-    if (pg) pg.textContent = `${book.title} · ${pageLabel(book, i)}`;
+    // Stopp-Kasten zuerst setzen, damit die Texthöhe stimmt, bevor der Satz ausgerichtet wird
     const sb = $('#stopbox');
     if (sb) sb.innerHTML = !P.playing ? stopBoxHtml() : '';
+    const before = [];
+    let n = 0;
+    // Großzügig Kontext laden – der Bereich ist fest, überstehender Text wird weich ausgeblendet
+    for (let k = i - 1; k >= 0 && n < 500; k--) { before.unshift(T(book.sentences[k])); n += T(book.sentences[k]).length; }
+    const after = [];
+    n = 0;
+    for (let k = i + 1; k < book.sentences.length && n < 900; k++) { after.push(T(book.sentences[k])); n += T(book.sentences[k]).length; }
+    box.innerHTML = `<p>${esc(before.join(' '))} <span class="cur">${esc(T(book.sentences[i]))}</span> ${esc(after.join(' '))}</p>`;
+    anchorText();
+    const pg = $('#pagelbl');
+    if (pg) pg.textContent = `${book.title} · ${pageLabel(book, i)}`;
   }
+  // Der aktuelle Satz beginnt immer auf derselben Höhe (gut ein Drittel von oben) – nichts springt
+  function anchorText() {
+    const box = $('#reading');
+    if (!box) return;
+    const p = box.querySelector('p'), cur = box.querySelector('.cur');
+    if (!p || !cur) return;
+    const y = Math.round(box.clientHeight * 0.34 - cur.offsetTop);
+    p.style.transform = `translateY(${y}px)`;
+  }
+  window.addEventListener('resize', anchorText);
   function stopBoxHtml() {
     return `<div class="stop-box"><span class="col" style="gap:2px"><span class="small">Gestoppt bei</span><span class="serif" style="font-size:20px;font-weight:600">${pageLabel(state.book, P.idx)}</span></span>
       <button class="btn" data-act="copy-cur" style="background:var(--bg)">${I.copy} Satz kopieren</button></div>`;

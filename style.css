@@ -113,8 +113,8 @@ body:not(.has-mini) .mini { display: none; }
 .mini .cover.ph { font-size: 6px; padding: 3px; }
 
 /* Player passt immer auf einen Bildschirm */
-.screen.player { height: 100vh; height: 100dvh; gap: 12px; overflow: hidden; padding-top: max(16px, env(safe-area-inset-top)); padding-bottom: calc(var(--navh) + 14px); }
-.screen.player .reading { flex: 1; min-height: 0; justify-content: center; -webkit-mask-image: linear-gradient(transparent, #000 14%, #000 86%, transparent); mask-image: linear-gradient(transparent, #000 14%, #000 86%, transparent); }
+.screen.player { flex: none; min-height: 0; height: 100vh; height: 100dvh; gap: 12px; overflow: hidden; padding-top: max(16px, env(safe-area-inset-top)); padding-bottom: calc(var(--navh) + 14px); }
+.screen.player .reading { flex: 1 1 0; min-height: 0; display: block; position: relative; -webkit-mask-image: linear-gradient(transparent, #000 14%, #000 86%, transparent); mask-image: linear-gradient(transparent, #000 14%, #000 86%, transparent); }
 .screen.player .sun-wrap { max-width: 300px; }
 .screen.player .sun-time { font-size: 38px; }
 .screen.player .ctl.main { width: 84px; height: 84px; border-radius: 42px; }
@@ -128,3 +128,6 @@ body:not(.has-mini) .mini { display: none; }
 }
 
 .brand { display: inline-flex; align-items: center; gap: 8px; font-family: var(--serif); font-size: 16px; font-weight: 600; letter-spacing: -.01em; color: var(--text); }
+
+.screen.player .reading p { position: absolute; left: 0; right: 0; top: 0; will-change: transform; }
+.screen.player #stopbox:empty { display: none; }
