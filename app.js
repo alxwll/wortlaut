@@ -21,10 +21,14 @@
   const CHARS_PER_SEC = 15.5; // ungefähr bei Tempo 1,0
   const isHD = (v) => /DragonHD/.test(v || '');
   const S = Object.assign(
-    { code: '', ownKey: '', ownRegion: 'westeurope', voice: 'de-DE-SeraphinaMultilingualNeural', rate: 1, theme: 'auto', workerUrl: '', timer: 20 },
+    { code: '', ownKey: '', ownRegion: 'westeurope', voice: 'de-DE-SeraphinaMultilingualNeural', rate: 1, theme: 'auto', workerUrl: '', timer: 0, findMode: 'page' },
     JSON.parse(localStorage.getItem('wortlaut.settings') || '{}')
   );
   const saveSettings = () => localStorage.setItem('wortlaut.settings', JSON.stringify(S));
+  // Timer ist jetzt optional: einmalig auf „Aus“ zurücksetzen
+  if (!S.timerV2) { S.timer = 0; S.timerV2 = 1; saveSettings(); }
+  const TIMER_OPTS = [['0', 'Aus'], ['15', '15'], ['30', '30'], ['60', '60'], ['sec', 'Kapitel']];
+  const PAUSE_NEW_SESSION_MS = 15 * 60000; // nach so langer Pause beginnt eine neue Sitzung
   const workerUrl = () => (S.workerUrl || (window.HB_CONFIG && window.HB_CONFIG.workerUrl) || '').replace(/\/+$/, '');
   const hasCloudVoice = () => !!(workerUrl() && (S.code || S.ownKey));
   function authHeaders() {
@@ -47,10 +51,10 @@
   let dbp;
   function db() {
     if (!dbp) dbp = new Promise((res, rej) => {
-      const r = indexedDB.open('wortlaut', 1);
+      const r = indexedDB.open('wortlaut', 2);
       r.onupgradeneeded = () => {
-        r.result.createObjectStore('books', { keyPath: 'id' });
-        r.result.createObjectStore('progress', { keyPath: 'id' });
+        const d = r.result;
+        for (const name of ['books', 'progress', 'quotes']) if (!d.objectStoreNames.contains(name)) d.createObjectStore(name, { keyPath: 'id' });
       };
       r.onsuccess = () => res(r.result);
       r.onerror = () => rej(r.error);
@@ -108,6 +112,9 @@
     return `<div class="cover ph ${cls}" style="background:${bg};color:${fg}">${esc(book.title)}</div>`;
   }
   const I = {
+    heart: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 20.5l-1.4-1.3C5.6 14.7 2.5 11.9 2.5 8.4 2.5 5.6 4.7 3.5 7.4 3.5c1.6 0 3.1.7 4.6 2.2 1.5-1.5 3-2.2 4.6-2.2 2.7 0 4.9 2.1 4.9 4.9 0 3.5-3.1 6.3-8.1 10.8z"/></svg>',
+    share: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M5 14v5h14v-5"/></svg>',
+    dots: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>',
     // Logo-Zeichen ohne Kachel: Klangbögen (Akzent) über aufgeschlagenem Buch (Textfarbe)
     logo: '<svg width="30" height="22" viewBox="26 50 148 112" aria-hidden="true"><path d="M78 122 a22 22 0 0 1 44 0" fill="none" stroke="var(--accent)" stroke-width="10" stroke-linecap="round"/><path d="M58 122 a42 42 0 0 1 84 0" fill="none" stroke="var(--accent)" stroke-width="10" stroke-linecap="round" opacity=".6"/><path d="M38 122 a62 62 0 0 1 124 0" fill="none" stroke="var(--accent)" stroke-width="10" stroke-linecap="round" opacity=".3"/><path d="M32 140 Q66 126 100 142 Q134 126 168 140" fill="none" stroke="currentColor" stroke-width="11" stroke-linecap="round"/><path d="M36 156 Q68 143 100 158 Q132 143 164 156" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" opacity=".45"/></svg>',
     lib: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4v16M9 4v16M13.5 5l4.5 14.5"/></svg>',
@@ -358,7 +365,6 @@
     if (state.startIdx == null) state.startIdx = p.pos;
     const start = state.startIdx;
     const listenMin = Math.round(book.totalChars / CHARS_PER_SEC / 60);
-    const timerOpts = [['0', 'Ohne'], ['10', '10'], ['20', '20'], ['30', '30'], ['sec', 'Abschnitt']];
     const endIdx = timerEndIdx(book, start, S.timer);
     let html = `<div class="screen">
       <a href="#/" class="icon-btn bare" aria-label="Zurück zur Bibliothek">${I.back}</a>
@@ -382,23 +388,35 @@
         <button class="btn" style="align-self:flex-start;background:var(--bg)" data-act="copy-last">${I.copy} Satz kopieren</button>
       </div>`;
     }
+    const quotes = await bookQuotes(book.id);
+    const mode = S.findMode || 'page';
+    const tabs = [['page', 'Seite'], ['words', 'Wörter'], ['chapter', 'Kapitel']];
+    let finder = '';
+    if (mode === 'page') {
+      finder = `<div class="field"><label for="page">Seitenzahl aus deinem Buch</label><input id="page" class="big" type="number" inputmode="numeric" min="1" placeholder="${E.pageOf(book, start)}"></div>`;
+    } else if (mode === 'words') {
+      const hits = state.query ? E.search(book, ensureIndex(), state.query, p.pos, 8) : [];
+      state.hits = hits;
+      finder = `<form class="field" id="wordform"><label for="words">4–5 Wörter aus deinem E-Book einfügen</label>
+          <div class="row" style="gap:6px;border-bottom:1.5px solid var(--line2)">${I.search}<input id="words" type="search" enterkeyhint="search" value="${esc(state.query)}" placeholder="Wörter einfügen" style="border:none"></div></form>
+        ${state.query ? (hits.length ? `<span class="small">${hits.length === 1 ? 'Ein Treffer' : (hits.length >= 8 ? 'Mindestens 8' : hits.length) + ' Treffer – der nächste ist ausgewählt'}${hits.length > 1 ? ` · <a href="#/search/${esc(book.id)}">alle ansehen</a>` : ''}</span>` : '<span class="small">Keine Stelle gefunden. Tipp: 4–5 Wörter am Stück, ohne Satzzeichen.</span>') : '<span class="small">Die Suche läuft ab deiner letzten Stelle nach vorn.</span>'}`;
+    } else {
+      const sec = book.sections[book.sentences[start].s];
+      finder = `<button class="list-btn" data-act="sections"><span class="col" style="gap:2px;min-width:0;text-align:left"><span style="font-weight:600">${esc(sec.doc ? sec.doc + ' · ' : '')}${esc(sec.title)}</span><span class="small">Anderes Kapitel wählen</span></span>${I.chev}</button>`;
+    }
     html += `<div class="col" style="gap:10px">
-      <h2 class="label">Ab wo?</h2>
-      <div class="split">
-        <div class="field"><label for="page">Seite</label><input id="page" class="big" type="number" inputmode="numeric" min="1" placeholder="${E.pageOf(book, start)}"></div>
-        <form class="field" id="wordform"><label for="words">Oder 4–5 Wörter aus dem Text</label>
-          <div class="row" style="gap:6px;border-bottom:1.5px solid var(--line2)">${I.search}<input id="words" type="search" enterkeyhint="search" placeholder="Wörter einfügen" style="border:none"></div>
-        </form>
-      </div>
-      <div class="between"><span class="small">Wortsuche läuft ab deiner letzten Stelle nach vorn</span><button class="btn link" data-act="sections">Abschnitt wählen</button></div>
+      <h2 class="label">Wo geht's weiter?</h2>
+      <div class="seg" role="tablist" aria-label="Stelle finden über">${tabs.map(([k, l]) => `<button role="tab" aria-selected="${mode === k}" class="${mode === k ? 'on' : ''}" data-act="findmode" data-v="${k}">${l}</button>`).join('')}</div>
+      ${finder}
       <div class="banner" id="startinfo"><b>Start ${pageLabel(book, start)}:</b> „${esc(T(book.sentences[start]).slice(0, 110))}${T(book.sentences[start]).length > 110 ? ' …' : ''}“</div>
     </div>
     <div class="col" style="gap:10px">
-      <h2 class="label">Wie lange? (Minuten)</h2>
-      <div class="chips">${timerOpts.map(([v, l]) => `<button class="chip ${String(S.timer) === v ? 'on' : ''}" data-act="timer" data-v="${v}">${l}</button>`).join('')}</div>
-      <span class="small">${endIdx != null ? `Endet ca. bei ${pageLabel(book, endIdx)} · ` : 'Läuft, bis du stoppst · '}Stimme: ${esc(voiceName(S.voice))}, ${String(S.rate).replace('.', ',')}×</span>
+      <h2 class="label row" style="gap:6px">${I.moon} Sleep-Timer <span style="text-transform:none;letter-spacing:0;font-weight:500">(optional)</span></h2>
+      <div class="chips">${TIMER_OPTS.map(([v, l]) => `<button class="chip ${String(S.timer) === v ? 'on' : ''}" data-act="timer" data-v="${v}" aria-label="${v === '0' ? 'Kein Timer' : v === 'sec' ? 'Bis Kapitelende' : v + ' Minuten'}">${l}</button>`).join('')}</div>
+      <span class="small">${endIdx != null ? `Endet ca. bei ${pageLabel(book, endIdx)} · ` : 'Läuft, bis du pausierst · '}Stimme: ${esc(voiceName(S.voice))}, ${String(S.rate).replace('.', ',')}×</span>
     </div>
-    <button class="btn solid big" data-act="start">${I.playS} ${start === p.pos && p.lastAt ? 'Weiter ab' : 'Vorlesen ab'} ${pageLabel(book, start)}</button>
+    <button class="btn solid big" data-act="start">${I.playS} Ab ${pageLabel(book, start)} hören${parseInt(S.timer, 10) > 0 ? ' · ' + S.timer + ' min' : S.timer === 'sec' ? ' · bis Kapitelende' : ''}</button>
+    ${quotes.length ? `<a class="list-btn" href="#/quotes/${esc(book.id)}" style="text-decoration:none;color:inherit"><span class="row" style="gap:10px">${I.heart}<span class="col" style="gap:2px"><span style="font-weight:600">Deine Zitate (${quotes.length})</span><span class="small">Ansehen, kürzen, teilen</span></span></span>${I.chev}</a>` : ''}
     <div class="between" style="margin-top:8px">
       ${book.pageMarks ? '<span class="small">Seitenzahlen exakt wie in der Druckausgabe</span>' : `<button class="btn link" data-act="pages">${book.printPages ? 'Seitenzahlen: Druckausgabe ' + book.printPages + ' S.' : 'Seitenzahl der Druckausgabe eintragen'}</button>`}
       <button class="btn link danger" data-act="delete">Entfernen</button>
@@ -406,16 +424,20 @@
     </div>`;
     app.innerHTML = html;
     const pageInp = $('#page');
-    pageInp.addEventListener('change', () => {
+    if (pageInp) pageInp.addEventListener('change', () => {
       const n = parseInt(pageInp.value, 10);
       if (n > 0) { state.startIdx = E.indexForPage(book, n); render(); }
     });
-    $('#wordform').addEventListener('submit', (e) => {
+    const wf = $('#wordform');
+    if (wf) wf.addEventListener('submit', (e) => {
       e.preventDefault();
       const q = $('#words').value.trim();
       if (q.length < 3) return toast('Bitte ein paar Wörter mehr eingeben.');
       state.query = q;
-      go('#/search/' + book.id);
+      state.selHit = 0;
+      const hits = E.search(book, ensureIndex(), q, state.progress.pos, 8);
+      if (hits.length) state.startIdx = hits[0].idx;
+      render();
     });
   });
   function voiceName(id) {
@@ -668,6 +690,7 @@
     P.playing = false;
     if (P.engine === 'device') speechSynthesis.cancel(); else audio.pause();
     setLoading(false);
+    P.pausedAt = Date.now();
     state.progress.pos = P.idx;
     state.progress.last = P.idx;
     state.progress.lastAt = new Date().toISOString();
@@ -703,13 +726,15 @@
   }
 
   // Timer
-  function startTimer(book, start) {
+  function startTimer(book, start, timerVal) {
+    const t = timerVal != null ? timerVal : S.timer;
     P.sessionMs = 0;
     P.stopAfter = null;
-    if (S.timer === 'sec') {
+    P.sessionQuotes = 0;
+    if (t === 'sec') {
       P.timer = { mode: 'sec', startIdx: start, endIdx: timerEndIdx(book, start, 'sec') };
-    } else if (parseInt(S.timer, 10) > 0) {
-      const ms = parseInt(S.timer, 10) * 60000;
+    } else if (parseInt(t, 10) > 0) {
+      const ms = parseInt(t, 10) * 60000;
       P.timer = { mode: 'min', totalMs: ms, remainingMs: ms };
     } else {
       P.timer = null;
@@ -756,6 +781,8 @@
     updateSun();
     const ms = $('#minisub');
     if (ms) ms.textContent = miniSub();
+    const tl = $('#timerlbl');
+    if (tl) tl.textContent = timerChipLabel();
     if (state.progress && Date.now() - (state.progress._saved || 0) > 15000) {
       state.progress._saved = Date.now();
       state.progress.lastAt = new Date().toISOString();
@@ -781,31 +808,211 @@
   }
 
   // Hören starten: Timer setzen, zum Player (ohne Zwischenschritte im Verlauf)
-  function beginSession(start, stay) {
+  function beginSession(start, stay, timerVal) {
     const book = state.book;
-    startTimer(book, start);
+    startTimer(book, start, timerVal);
+    P.pausedAt = null;
     P.started = true;
     state.startIdx = null;
     if (!stay) go('#/player', true);
     return playFrom(start);
   }
   async function chooseTimer() {
-    const opts = [['0', 'Ohne Timer'], ['10', '10 Minuten'], ['20', '20 Minuten'], ['30', '30 Minuten'], ['sec', 'Bis Abschnittsende']];
-    if (P.started && P.timer && P.timer.mode === 'min') opts.unshift(['plus', '+10 Minuten dazu']);
+    const opts = [['0', 'Aus'], ['15', '15 Minuten'], ['30', '30 Minuten'], ['60', '60 Minuten'], ['sec', 'Bis Kapitelende']];
+    if (P.started && P.timer && P.timer.mode === 'min') opts.unshift(['plus', '+15 Minuten dazu']);
     const res = await sheet(`<h2 class="label">Sleep-Timer</h2><div>${opts.map(([v, l]) => `<button class="list-btn" data-v="${v}"><span>${l}</span>${String(S.timer) === v ? '✓' : ''}</button>`).join('')}</div>`);
     if (res == null) return;
     if (res === 'plus') {
-      P.timer.remainingMs += 600000; P.timer.totalMs += 600000; P.stopAfter = null;
-      updatePlayerUi(); toast('10 Minuten mehr');
+      P.timer.remainingMs += 900000; P.timer.totalMs += 900000; P.stopAfter = null;
+      updatePlayerUi(); toast('15 Minuten mehr');
       return;
     }
     S.timer = res === 'sec' ? 'sec' : parseInt(res, 10);
     saveSettings();
     if (P.started) {
+      const q = P.sessionQuotes;
       startTimer(state.book, P.idx);
-      P.sessionMs = 0;
+      P.sessionQuotes = q;
     }
     updatePlayerUi();
+  }
+  function timerChipLabel() {
+    if (!P.started || !P.timer) return S.timer === 'sec' ? 'Kapitel' : parseInt(S.timer, 10) > 0 && !P.started ? S.timer + ' min' : 'Aus';
+    if (P.timer.mode === 'sec') return 'Kapitel';
+    return Math.max(1, Math.ceil(timerLeftMs() / 60000)) + ' min';
+  }
+
+  // ---------------- Zitate ----------------
+  async function bookQuotes(bookId) {
+    const all = await dbAll('quotes');
+    state.quoteList = all;
+    return all.filter((q) => q.bookId === bookId).sort((a, b) => a.from - b.from);
+  }
+  const quoteText = (book, q) => {
+    const parts = [];
+    for (let k = q.from; k <= q.to; k++) parts.push(T(book.sentences[k]));
+    return parts.join(' ');
+  };
+  const markActive = () => !!(P.lastQuote && Date.now() - P.lastQuoteAt < 20000);
+  let markTimer;
+  function showMarkbar() {
+    const bar = $('#markbar');
+    if (!bar) return;
+    clearTimeout(markTimer);
+    if (!markActive()) { bar.innerHTML = ''; return; }
+    const q = P.lastQuote;
+    const n = q.to - q.from + 1;
+    bar.innerHTML = `<div class="markbar" role="status"><span class="row" style="gap:8px">${I.heart}<span class="col" style="gap:0"><b>Gemerkt · ${n === 1 ? '1 Satz' : n + ' Sätze'}</b><span class="small">Tipp im Text auf weitere Sätze, um sie dazuzunehmen</span></span></span>
+      <button class="btn" data-act="mark-undo">Rückgängig</button></div>`;
+    markTimer = setTimeout(() => { bar.innerHTML = ''; updatePlayerUi(); anchorText(); }, 20000 - (Date.now() - P.lastQuoteAt));
+    anchorText();
+  }
+  async function saveQuote(q) {
+    await dbPut('quotes', q);
+    await bookQuotes(q.bookId);
+  }
+  async function markQuote(idx) {
+    const book = state.book;
+    if (!book) return;
+    if (idx == null && markActive()) return showMarkbar(); // schon gemerkt – nichts doppelt
+    const at = idx != null ? idx : P.idx;
+    const q = { id: 'q' + Date.now().toString(36), bookId: book.id, from: idx != null ? at : Math.max(0, at - 1), to: at, createdAt: new Date().toISOString() };
+    P.lastQuote = q;
+    P.lastQuoteAt = Date.now();
+    P.sessionQuotes = (P.sessionQuotes || 0) + 1;
+    await saveQuote(q);
+    updatePlayerUi();
+    showMarkbar();
+  }
+  async function extendQuote(idx) {
+    const q = P.lastQuote;
+    if (idx < q.from) q.from = Math.max(idx, q.to - 12);
+    else if (idx > q.to) q.to = Math.min(idx, q.from + 12);
+    else if (idx === q.from && q.from < q.to) q.from++; // Antippen am Rand nimmt den Satz wieder raus
+    else if (idx === q.to && q.to > q.from) q.to--;
+    P.lastQuoteAt = Date.now();
+    await saveQuote(q);
+    updatePlayerUi();
+    showMarkbar();
+  }
+  async function undoMark() {
+    if (!P.lastQuote) return;
+    await dbDel('quotes', P.lastQuote.id);
+    P.sessionQuotes = Math.max(0, (P.sessionQuotes || 1) - 1);
+    P.lastQuote = null;
+    await bookQuotes(state.book.id);
+    updatePlayerUi();
+    showMarkbar();
+    toast('Entfernt');
+  }
+  // Antippen im mitlaufenden Text: frisches Zitat erweitern, sonst Satz neu merken
+  document.addEventListener('click', (e) => {
+    const sp = e.target.closest('#reading span[data-i]');
+    if (!sp || !state.book) return;
+    const idx = +sp.dataset.i;
+    if (markActive()) extendQuote(idx); else markQuote(idx);
+  });
+
+  route(/^\/quotes\/([^/]+)$/, async (id) => {
+    const book = await loadBook(id);
+    if (!book) return go('#/');
+    const quotes = (await bookQuotes(id)).slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const when = (iso) => {
+      const d = new Date(iso);
+      return d.toDateString() === new Date().toDateString() ? 'heute, ' + d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString('de-DE', { day: 'numeric', month: 'short' });
+    };
+    app.innerHTML = `<div class="screen">
+      <div class="row" style="gap:8px"><a href="#/book/${esc(id)}" class="icon-btn bare" aria-label="Zurück zum Buch">${I.back}</a><span class="muted" style="font-size:14px">${esc(book.title)}</span></div>
+      <div class="between" style="align-items:flex-end"><h1>Deine Zitate</h1><span class="muted">${quotes.length} gemerkt</span></div>
+      ${quotes.length ? quotes.map((q) => `<div class="card" style="gap:10px">
+        <div class="between" style="align-items:baseline"><span class="serif" style="font-size:20px;font-weight:600">${pageLabel(book, q.from)}</span><span class="small">${esc(when(q.createdAt))}</span></div>
+        <p class="quote" style="font-size:17px">„${esc(quoteText(book, q))}“</p>
+        <div class="row" style="gap:8px">
+          <button class="btn solid" data-act="q-share" data-id="${esc(q.id)}">${I.share} Teilen</button>
+          <button class="btn" data-act="q-copy" data-id="${esc(q.id)}" style="background:var(--bg)">${I.copy} Kopieren</button>
+          <button class="icon-btn" style="margin-left:auto;background:var(--bg)" data-act="q-more" data-id="${esc(q.id)}" aria-label="Zitat bearbeiten oder löschen">${I.dots}</button>
+        </div></div>`).join('') : `<div class="empty">Noch keine Zitate.<br>Tippe beim Hören auf ❤ „Das war gut“ – oder direkt auf einen Satz im Text.</div>`}
+    </div>`;
+  });
+  async function findQuote(qid) { return (await dbAll('quotes')).find((q) => q.id === qid); }
+  async function copyQuote(qid) {
+    const q = await findQuote(qid);
+    const book = state.book;
+    if (!q || !book) return;
+    try { await navigator.clipboard.writeText(`„${quoteText(book, q)}“ – ${book.title}${book.author ? ', ' + book.author : ''}, ${pageLabel(book, q.from)}`); toast('Zitat kopiert'); } catch { toast('Kopieren nicht möglich'); }
+  }
+  async function quoteMenu(qid) {
+    const q = await findQuote(qid);
+    const book = state.book;
+    if (!q || !book) return;
+    const res = await sheet(`<h2 class="label">Zitat anpassen</h2>
+      <p class="quote" style="font-size:16px;margin:0">„${esc(quoteText(book, q))}“</p>
+      <div>
+        <button class="list-btn" data-v="addBefore"><span>Satz davor dazunehmen</span></button>
+        <button class="list-btn" data-v="addAfter"><span>Satz danach dazunehmen</span></button>
+        ${q.to > q.from ? '<button class="list-btn" data-v="cutStart"><span>Ersten Satz entfernen</span></button><button class="list-btn" data-v="cutEnd"><span>Letzten Satz entfernen</span></button>' : ''}
+        <button class="list-btn" data-v="delete"><span class="danger" style="color:#B3261E">Zitat löschen</span></button>
+      </div>`);
+    if (!res) return;
+    if (res === 'delete') { await dbDel('quotes', q.id); toast('Gelöscht'); return render(); }
+    if (res === 'addBefore') q.from = Math.max(0, q.from - 1);
+    if (res === 'addAfter') q.to = Math.min(book.sentences.length - 1, q.to + 1);
+    if (res === 'cutStart' && q.to > q.from) q.from++;
+    if (res === 'cutEnd' && q.to > q.from) q.to--;
+    await saveQuote(q);
+    render();
+  }
+  // Zitat als Bild im Story-Format (1080 × 1920) im Wort.-Laut.-Look
+  async function shareQuote(qid) {
+    const q = await findQuote(qid);
+    const book = state.book;
+    if (!q || !book) return;
+    const text = quoteText(book, q);
+    const W = 1080, H = 1920, pad = 110;
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    try { await document.fonts.load('600 60px "Source Serif 4"'); await document.fonts.load('600 40px Figtree'); } catch (e) {}
+    g.fillStyle = '#1C2433'; g.fillRect(0, 0, W, H);
+    // Klangbögen über Buch (Logo) oben
+    g.lineCap = 'round';
+    [[44, 1], [84, 0.6], [124, 0.3]].forEach(([r, o]) => { g.globalAlpha = o; g.strokeStyle = '#E8A35C'; g.lineWidth = 16; g.beginPath(); g.arc(W / 2, 330, r, Math.PI, 0); g.stroke(); });
+    g.globalAlpha = 1; g.strokeStyle = '#F1ECE4'; g.lineWidth = 18;
+    g.beginPath(); g.moveTo(W / 2 - 136, 366); g.quadraticCurveTo(W / 2 - 68, 338, W / 2, 370); g.quadraticCurveTo(W / 2 + 68, 338, W / 2 + 136, 366); g.stroke();
+    // Zitat umbrechen und so groß wie möglich setzen
+    const wrap = (size) => {
+      g.font = `600 ${size}px "Source Serif 4", Georgia, serif`;
+      const words = ('„' + text + '“').split(/\s+/);
+      const lines = [];
+      let line = '';
+      for (const w of words) {
+        const t = line ? line + ' ' + w : w;
+        if (g.measureText(t).width > W - pad * 2 && line) { lines.push(line); line = w; } else line = t;
+      }
+      if (line) lines.push(line);
+      return lines;
+    };
+    let size = 76, lines = wrap(size);
+    while (lines.length * size * 1.32 > 1000 && size > 34) { size -= 4; lines = wrap(size); }
+    const lh = size * 1.32;
+    let y = 520 + (1000 - lines.length * lh) / 2 + size;
+    g.fillStyle = '#F1ECE4';
+    for (const l of lines) { g.fillText(l, pad, y); y += lh; }
+    // Quelle
+    g.fillStyle = '#E8A35C'; g.fillRect(pad, 1600, 80, 6);
+    g.fillStyle = '#F1ECE4'; g.font = '600 44px Figtree, sans-serif'; g.fillText(book.title.slice(0, 40), pad, 1680);
+    g.fillStyle = '#A9B1C2'; g.font = '400 36px Figtree, sans-serif'; g.fillText(`${book.author ? book.author.slice(0, 40) + ' · ' : ''}${pageLabel(book, q.from)}`, pad, 1736);
+    g.fillStyle = '#A9B1C2'; g.font = '600 34px "Source Serif 4", serif'; g.textAlign = 'right'; g.fillText('Wort. Laut.', W - pad, 1736);
+    const blob = await new Promise((res) => c.toBlob(res, 'image/png'));
+    const file = new File([blob], 'zitat.png', { type: 'image/png' });
+    const caption = `„${text}“ – ${book.title}`;
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], text: caption }); return; } catch (e) { if (e && e.name === 'AbortError') return; }
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'zitat.png';
+    document.body.appendChild(a); a.click(); a.remove();
+    toast('Bild gespeichert');
   }
 
   // ---------------- Player-Ansicht ----------------
@@ -850,14 +1057,18 @@
     // Stopp-Kasten zuerst setzen, damit die Texthöhe stimmt, bevor der Satz ausgerichtet wird
     const sb = $('#stopbox');
     if (sb) sb.innerHTML = !P.playing ? stopBoxHtml() : '';
-    const before = [];
-    let n = 0;
     // Großzügig Kontext laden – der Bereich ist fest, überstehender Text wird weich ausgeblendet
-    for (let k = i - 1; k >= 0 && n < 500; k--) { before.unshift(T(book.sentences[k])); n += T(book.sentences[k]).length; }
-    const after = [];
+    let lo = i, hi = i, n = 0;
+    while (lo > 0 && n < 500) { lo--; n += T(book.sentences[lo]).length; }
     n = 0;
-    for (let k = i + 1; k < book.sentences.length && n < 900; k++) { after.push(T(book.sentences[k])); n += T(book.sentences[k]).length; }
-    box.innerHTML = `<p>${esc(before.join(' '))} <span class="cur">${esc(T(book.sentences[i]))}</span> ${esc(after.join(' '))}</p>`;
+    while (hi < book.sentences.length - 1 && n < 900) { hi++; n += T(book.sentences[hi]).length; }
+    const marked = (k) => (state.quoteList || []).some((q) => q.bookId === book.id && k >= q.from && k <= q.to);
+    let html = '';
+    for (let k = lo; k <= hi; k++) {
+      const cls = (k === i ? 'cur' : '') + (marked(k) ? ' q' : '');
+      html += `<span data-i="${k}" class="${cls.trim()}">${esc(T(book.sentences[k]))}</span> `;
+    }
+    box.innerHTML = `<p>${html}</p>`;
     anchorText();
     const pg = $('#pagelbl');
     if (pg) pg.textContent = `${book.title} · ${pageLabel(book, i)}`;
@@ -880,7 +1091,9 @@
     const b = $('#mainbtn');
     if (b) { b.innerHTML = P.playing ? I.pause : I.play; b.setAttribute('aria-label', P.playing ? 'Pause' : 'Abspielen'); }
     const tl = $('#timerlbl');
-    if (tl) tl.textContent = !P.timer ? 'Timer' : P.timer.mode === 'sec' ? 'Abschnitt' : `${Math.round(P.timer.totalMs / 60000)} min`;
+    if (tl) tl.textContent = timerChipLabel();
+    const mb = $('#markbtn');
+    if (mb) { const on = markActive(); mb.classList.toggle('on', on); mb.querySelector('span').textContent = on ? 'Gemerkt' : 'Das war gut'; }
     updateMini();
     const err = $('#perr');
     if (err) err.innerHTML = P.error ? `<div class="banner">${esc(P.error)}${P.error.includes('Kontingent') ? '' : ' <a href="#/settings">Einstellungen</a>'}</div>` : '';
@@ -907,6 +1120,7 @@
       if (!P.playing) P.idx = state.progress.pos;
     }
     const book = state.book;
+    await bookQuotes(book.id);
     app.innerHTML = `<div class="screen player">
       <div class="between"><button class="icon-btn bare" data-act="minimize" aria-label="Player minimieren">${I.down}</button>
         <button class="btn link" id="pagelbl" data-act="open" data-id="${esc(book.id)}" style="flex:1;justify-content:center;color:var(--muted);font-weight:500;min-width:0"></button><span style="width:32px"></span></div>
@@ -914,6 +1128,7 @@
       <div class="col" style="align-items:center;gap:6px"><div class="sun-wrap" id="sun"></div><span class="muted" id="sunsub" style="text-align:center"></span></div>
       <div id="perr"></div>
       <div class="reading" id="reading" aria-live="off"></div>
+      <div id="markbar"></div>
       <div id="stopbox"></div>
       <div class="controls">
         <button class="ctl" data-act="prev" aria-label="Einen Satz zurück">${I.prev}</button>
@@ -921,12 +1136,13 @@
         <button class="ctl" data-act="next" aria-label="Einen Satz vor">${I.next}</button>
       </div>
       <div class="chips" style="justify-content:center;flex-wrap:nowrap">
-        <button class="chip ichip" id="plus10" data-act="plus10">${I.moon}<span id="timerlbl">Timer</span></button>
+        <button class="chip ichip" id="plus10" data-act="plus10" aria-label="Sleep-Timer">${I.moon}<span id="timerlbl">Aus</span></button>
         <button class="chip ichip" data-act="rate" aria-label="Tempo">${I.gauge}<span id="ratelbl">${String(S.rate).replace('.', ',')}×</span></button>
-        <button class="chip ichip" data-act="endnow">${I.stop}<span>Beenden</span></button>
+        <button class="chip ichip mark" id="markbtn" data-act="mark">${I.heart}<span>Das war gut</span></button>
       </div>
     </div>`;
     updatePlayerUi();
+    showMarkbar();
   });
 
   // ---------------- Gestoppt ----------------
@@ -953,7 +1169,8 @@
         <button class="btn" data-act="copy-last" style="background:var(--bg)">${I.copy} Satz kopieren</button>
       </div>
       <div class="col" style="margin-top:auto;gap:8px">
-        ${P.endedBy === 'end' ? '' : `<button class="btn solid big" data-act="more10">Noch 10 Minuten</button>`}
+        ${P.sessionQuotes ? `<a class="list-btn" href="#/quotes/${esc(book.id)}" style="text-decoration:none;color:inherit;margin-bottom:6px"><span class="row" style="gap:10px">${I.heart}<span class="col" style="gap:2px"><span style="font-weight:600">${P.sessionQuotes === 1 ? '1 Zitat' : P.sessionQuotes + ' Zitate'} gemerkt</span><span class="small">Ansehen, kürzen, teilen</span></span></span>${I.chev}</a>` : ''}
+        ${P.endedBy === 'end' ? '' : `<button class="btn solid big" data-act="more15">Noch 15 Minuten</button>`}
         <a href="#/" class="btn link" style="justify-content:center;text-decoration:none">Zur Bibliothek</a>
       </div>
     </div>`;
@@ -1207,7 +1424,7 @@
       }
       case 'toggle':
         if (P.playing) return pause();
-        if (!P.started) return beginSession(P.idx, true);
+        if (!P.started || (P.pausedAt && Date.now() - P.pausedAt > PAUSE_NEW_SESSION_MS)) return beginSession(P.idx, true);
         return resume();
       case 'prev': return jumpTo(P.idx - 1);
       case 'next': return jumpTo(P.idx + 1);
@@ -1222,16 +1439,13 @@
         if (P.engine === 'cloud' && P.playing) playFrom(P.idx);
         return;
       }
-      case 'endnow': {
-        const last = P.idx;
-        tick();
-        return finishSession(last, 'manual');
-      }
-      case 'more10': {
-        S.timer = 10;
-        saveSettings();
-        return beginSession(state.progress.pos);
-      }
+      case 'more15': return beginSession(state.progress.pos, false, 15);
+      case 'findmode': S.findMode = el.dataset.v; saveSettings(); return render();
+      case 'mark': return markQuote();
+      case 'mark-undo': return undoMark();
+      case 'q-share': return shareQuote(el.dataset.id);
+      case 'q-copy': return copyQuote(el.dataset.id);
+      case 'q-more': return quoteMenu(el.dataset.id);
       case 'savecode': return saveCode();
       case 'clearkey': S.ownKey = ''; saveSettings(); return render();
       case 'setrate': S.rate = parseFloat(el.dataset.v); saveSettings(); P.cache.clear(); return render();

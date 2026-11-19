@@ -131,3 +131,17 @@ body:not(.has-mini) .mini { display: none; }
 
 .screen.player .reading p { position: absolute; left: 0; right: 0; top: 0; will-change: transform; }
 .screen.player #stopbox:empty { display: none; }
+
+/* Umschalter Seite / Wörter / Kapitel */
+.seg { display: flex; gap: 4px; background: var(--surface); border-radius: 999px; padding: 4px; }
+.seg button { flex: 1; height: 40px; border: none; border-radius: 999px; background: transparent; font-weight: 600; font-size: 14px; color: var(--muted); }
+.seg button.on { background: var(--btn); color: var(--btn-text); }
+/* Zitate */
+.reading span[data-i] { cursor: pointer; }
+.reading .q { text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 3px; text-underline-offset: 5px; color: var(--text); }
+.chip.mark { color: var(--accent-text); }
+.chip.mark.on { background: var(--accent); border-color: var(--accent); color: #2A160A; }
+.markbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--surface); border-radius: 16px; padding: 10px 10px 10px 14px; font-size: 14px; }
+.markbar svg { color: var(--accent); flex-shrink: 0; }
+.markbar .btn { height: 38px; padding: 0 12px; background: var(--bg); }
+.screen.player #markbar:empty { display: none; }
