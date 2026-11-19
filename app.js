@@ -112,6 +112,7 @@
     return `<div class="cover ph ${cls}" style="background:${bg};color:${fg}">${esc(book.title)}</div>`;
   }
   const I = {
+    book: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5.5c3-1.3 6-1.3 9 .7 3-2 6-2 9-.7V19c-3-1.3-6-1.3-9 .7-3-2-6-2-9-.7z"/><path d="M12 6.2v13.5"/></svg>',
     // Monogramm „w.“ mit klingendem Punkt (Logo von Wort. Laut.)
     mono: '<svg width="32" height="32" viewBox="0 0 200 200" aria-hidden="true"><rect width="200" height="200" rx="46" fill="#141414"/><g transform="translate(7 3)"><path d="M37.1 123.0 22.0 60.7H41.8L49.5 108.1H51.9L61.4 60.7H84.0L93.9 108.1H96.4L103.7 60.7H123.1L108.0 123.0H81.8L73.2 76.0H71.0L63.0 123.0Z" fill="#DDF35B"/><path d="M151.1 99.2 A18 18 0 0 1 151.1 126.8" fill="none" stroke="#FF5B3A" stroke-width="7" stroke-linecap="round"/><path d="M158.1 90.8 A29 29 0 0 1 158.1 135.2" fill="none" stroke="#FF5B3A" stroke-width="7" stroke-linecap="round" opacity=".5"/><circle cx="139.5" cy="113" r="10" fill="#FF5B3A"/></g></svg>',
     heart: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 20.5l-1.4-1.3C5.6 14.7 2.5 11.9 2.5 8.4 2.5 5.6 4.7 3.5 7.4 3.5c1.6 0 3.1.7 4.6 2.2 1.5-1.5 3-2.2 4.6-2.2 2.7 0 4.9 2.1 4.9 4.9 0 3.5-3.1 6.3-8.1 10.8z"/></svg>',
@@ -193,6 +194,7 @@
   function tabOf(h) {
     if (/^\/(player|stopped|listen)/.test(h)) return 'listen';
     if (/^\/(settings|admin)/.test(h)) return 'settings';
+    if (/^\/read/.test(h)) return 'read';
     return 'lib';
   }
   async function render() {
@@ -208,7 +210,7 @@
   // Untere Navigation + Mini-Player
   function updateChrome() {
     const nav = $('#tabbar');
-    const tabs = [['lib', '#/', 'Bibliothek', I.lib], ['listen', '#/player', 'Hören', I.ear], ['settings', '#/settings', 'Einstellungen', I.gear]];
+    const tabs = [['lib', '#/', 'Bibliothek', I.lib], ['listen', '#/player', 'Hören', I.ear], ['read', '#/read', 'Lesen', I.book], ['settings', '#/settings', 'Einstellungen', I.gear]];
     nav.innerHTML = tabs.map(([k, href, label, icon]) => `<button class="tab ${state.tab === k ? 'on' : ''}" data-act="tab" data-v="${href}" ${state.tab === k ? 'aria-current="page"' : ''}>${icon}<span>${label}</span></button>`).join('');
     updateMini();
   }
@@ -335,6 +337,7 @@
       let done = false;
       const close = (v) => {
         if (done) return; done = true;
+        document.removeEventListener('keydown', onKey);
         ov.classList.add('closing');
         sh.style.transition = 'transform .2s ease-in'; sh.style.transform = 'translateY(100%)';
         setTimeout(() => ov.remove(), 200);
@@ -358,7 +361,8 @@
         if (dy > 110 || fast) return close(undefined);
         sh.style.transition = 'transform .2s ease-out'; sh.style.transform = ''; ov.style.background = '';
       });
-      ov.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(undefined); });
+      const onKey = (e) => { if (e.key === 'Escape' && document.body.lastElementChild === ov) close(undefined); };
+      document.addEventListener('keydown', onKey);
       ov.addEventListener('click', (e) => {
         if (e.target === ov) return close(undefined);
         const b = e.target.closest('[data-v]');
@@ -545,6 +549,265 @@
     </div>`;
     $('#sform').addEventListener('submit', (e) => { e.preventDefault(); state.query = $('#sq').value.trim(); state.selHit = 0; render(); });
   });
+
+  // ---------------- Reader: selbst weiterlesen ----------------
+  // Teilt sich das Lesezeichen mit dem Player (state.progress.pos): Lesen und Hören setzen an derselben Stelle an.
+  const RD_SIZES = [16, 18, 20, 22, 25];
+  const RD_FONTS = [['serif', 'Buch', "'Source Serif 4', Georgia, serif"], ['sans', 'Klar', 'Figtree, system-ui, sans-serif'], ['easy', 'Leicht', "'Atkinson Hyperlegible', Verdana, sans-serif"]];
+  const RD_BGS = [['paper', 'Papier'], ['sand', 'Sand'], ['night', 'Nacht'], ['auto', 'Auto']];
+  const RD_PAD = 28;
+  const rd = () => Object.assign({ font: 'serif', size: 2, bg: 'auto', mode: 'page' }, S.reader || {});
+  const R = { book: null, sec: 0, page: 0, pages: 1, W: 1, idx: 0, mark: null, bare: false, saveT: null };
+  const rdSecEnd = (book, si) => (si + 1 < book.sections.length ? book.sections[si + 1].start : book.sentences.length);
+  const rdBg = () => { const b = rd().bg; return b === 'auto' ? (isNight() ? 'night' : 'paper') : b; };
+  const rdSecTitle = (book, si) => { const s = book.sections[si]; return (s.doc ? s.doc + ' · ' : '') + s.title; };
+  const rdLive = () => P.started && P.playing && R.book && state.book && state.book.id === R.book.id;
+  function rdSectionHtml(book, si) {
+    const from = book.sections[si].start, to = rdSecEnd(book, si);
+    let html = '', para = [], ph = false;
+    const flush = () => { if (para.length) html += ph ? `<h2 class="rd-h">${para.join(' ')}</h2>` : `<p>${para.join(' ')}</p>`; para = []; };
+    for (let i = from; i < to; i++) {
+      const s = book.sentences[i];
+      if (para.length && !!s.h !== ph) flush();
+      ph = !!s.h;
+      para.push(`<span data-i="${i}">${esc(T(s))}</span>`);
+      if (s.pe) flush();
+    }
+    flush();
+    return html;
+  }
+  function rdStyle() {
+    const o = rd(), el = $('.reader');
+    if (!el) return;
+    const bg = rdBg();
+    el.className = `reader rd-${bg}${o.mode === 'scroll' ? ' rd-scroll' : ''}${R.bare ? ' rd-bare' : ''}`;
+    el.style.setProperty('--rd-font', (RD_FONTS.find((f) => f[0] === o.font) || RD_FONTS[0])[2]);
+    el.style.setProperty('--rd-size', RD_SIZES[o.size] + 'px');
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = { paper: '#FAF7F2', sand: '#EFE6D6', night: '#16181D' }[bg];
+  }
+  function rdLayout() {
+    const view = $('#rdview'), text = $('#rdtext');
+    if (!view || !text) return;
+    if (rd().mode === 'scroll') {
+      Object.assign(text.style, { width: '', height: '', columnWidth: '', columnGap: '', transform: '' });
+      R.pages = 1; R.W = 1;
+      return;
+    }
+    const W = view.clientWidth || 1, H = view.clientHeight || 1;
+    R.W = W;
+    Object.assign(text.style, { width: (W - 2 * RD_PAD) + 'px', height: H + 'px', columnWidth: (W - 2 * RD_PAD) + 'px', columnGap: 2 * RD_PAD + 'px' });
+    R.pages = Math.max(1, Math.round((text.scrollWidth + 2 * RD_PAD) / W));
+  }
+  // Seite (Bildschirmseite), auf der ein Satz beginnt
+  function rdPageOf(idx) {
+    const text = $('#rdtext'), el = text && text.querySelector(`[data-i="${idx}"]`);
+    if (!el || rd().mode === 'scroll') return 0;
+    const r = el.getClientRects()[0];
+    if (!r) return 0;
+    return Math.max(0, Math.floor((r.left - text.getBoundingClientRect().left + 2) / R.W));
+  }
+  // Erster (auch angeschnittener) Satz, der gerade zu sehen ist
+  function rdFirstVisible() {
+    const text = $('#rdtext'), view = $('#rdview');
+    const spans = text ? text.querySelectorAll('[data-i]') : [];
+    if (!spans.length) return R.idx;
+    if (rd().mode === 'scroll') {
+      const top = view.getBoundingClientRect().top + 8;
+      for (const s of spans) { const r = s.getBoundingClientRect(); if (r.height && r.bottom > top) return +s.dataset.i; }
+      return +spans[spans.length - 1].dataset.i;
+    }
+    const x0 = text.getBoundingClientRect().left;
+    for (const s of spans) {
+      const rs = s.getClientRects();
+      if (!rs.length) continue;
+      const last = rs[rs.length - 1];
+      if (Math.floor((last.right - x0 - 2) / R.W) >= R.page) return +s.dataset.i;
+    }
+    return +spans[spans.length - 1].dataset.i;
+  }
+  function rdFoot() {
+    const book = R.book, idx = R.idx;
+    const pl = $('#rdpage'), left = $('#rdleft'), bar = $('#rdbar');
+    if (!pl) return;
+    pl.textContent = pageLabel(book, idx);
+    const end = rdSecEnd(book, R.sec) - 1;
+    const n = parseInt(E.pageOf(book, end), 10) - parseInt(E.pageOf(book, idx), 10);
+    left.textContent = isNaN(n) ? '' : n <= 0 ? 'letzte Seite im Kapitel' : n === 1 ? 'noch 1 Seite im Kapitel' : `noch ${n} Seiten im Kapitel`;
+    let f;
+    if (rd().mode === 'scroll') { const v = $('#rdview'); f = v.scrollHeight > v.clientHeight ? v.scrollTop / (v.scrollHeight - v.clientHeight) : 1; }
+    else f = R.pages > 1 ? R.page / (R.pages - 1) : 1;
+    bar.style.width = Math.round(Math.max(0.02, Math.min(1, f)) * 100) + '%';
+    const pill = $('#rdpill');
+    if (pill) pill.hidden = R.bare || rdLive();
+  }
+  // Stelle merken: wird zur Startstelle fürs Hören (solange nicht gerade vorgelesen wird)
+  function rdSync(keepIdx) {
+    R.idx = keepIdx != null ? keepIdx : rdFirstVisible();
+    rdFoot();
+    if (rdLive()) return;
+    clearTimeout(R.saveT);
+    R.saveT = setTimeout(() => {
+      if (!state.progress || rdLive()) return;
+      state.progress.pos = R.idx;
+      state.progress.lastAt = new Date().toISOString();
+      saveProgress();
+      // pausierte Sitzung: beim nächsten Play ab der gelesenen Stelle starten
+      if (P.started && !P.playing && P.idx !== R.idx) { P.idx = R.idx; P.chunk = null; }
+    }, 400);
+  }
+  function rdGo(p, keepIdx) {
+    R.page = Math.max(0, Math.min(R.pages - 1, p));
+    const text = $('#rdtext');
+    if (text && rd().mode !== 'scroll') text.style.transform = `translateX(${-R.page * R.W}px)`;
+    rdSync(keepIdx);
+  }
+  function rdLoad(si, target) {
+    const book = R.book, text = $('#rdtext'), view = $('#rdview');
+    if (!text) return;
+    R.sec = si;
+    const next = si + 1 < book.sections.length ? book.sections[si + 1] : null;
+    text.innerHTML = rdSectionHtml(book, si) + (next ? `<button class="rd-next" data-act="rd-nextsec">Weiter: ${esc(rdSecTitle(book, si + 1).slice(0, 60))} ›</button>` : '<p class="rd-end">Ende des Buchs</p>');
+    if (R.mark != null) { const m = text.querySelector(`[data-i="${R.mark}"]`); if (m) m.classList.add('rd-mark'); }
+    $('#rdtitle').textContent = rdSecTitle(book, si);
+    text.style.transition = 'none';
+    rdLayout();
+    if (rd().mode === 'scroll') {
+      const el = target === 'end' ? null : text.querySelector(`[data-i="${target}"]`);
+      view.scrollTop = target === 'end' ? view.scrollHeight : el ? Math.max(0, el.getBoundingClientRect().top - view.getBoundingClientRect().top + view.scrollTop - 40) : 0;
+      rdSync(target === 'end' ? null : target);
+    } else if (target === 'end') rdGo(R.pages - 1);
+    else rdGo(rdPageOf(target), target);
+    void text.offsetWidth;
+    text.style.transition = '';
+  }
+  function rdBare(on) { R.bare = on; rdStyle(); rdFoot(); }
+  function rdTurn(d) {
+    const book = R.book, view = $('#rdview');
+    if (!view) return;
+    if (rd().mode === 'scroll') { view.scrollBy({ top: d * (view.clientHeight - 60), behavior: 'smooth' }); return; }
+    const np = R.page + d;
+    if (np >= R.pages) { if (R.sec + 1 < book.sections.length) rdLoad(R.sec + 1, book.sections[R.sec + 1].start); }
+    else if (np < 0) { if (R.sec > 0) rdLoad(R.sec - 1, 'end'); }
+    else rdGo(np);
+    if (!R.bare) rdBare(true);
+  }
+  function rdRelayout() {
+    if (!$('.reader')) return;
+    const keep = R.idx;
+    rdStyle();
+    rdLoad(R.sec, keep);
+  }
+  window.addEventListener('resize', () => { if ($('.reader')) { clearTimeout(R.rt); R.rt = setTimeout(rdRelayout, 150); } });
+  document.addEventListener('keydown', (e) => {
+    if (!$('.reader') || document.querySelector('.overlay')) return;
+    if (e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); rdTurn(1); }
+    if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); rdTurn(-1); }
+  });
+  function rdBindGestures() {
+    const view = $('#rdview');
+    let x0 = null, y0 = 0, swiped = false;
+    view.addEventListener('touchstart', (e) => { if (e.touches.length !== 1) { x0 = null; return; } x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; swiped = false; }, { passive: true });
+    view.addEventListener('touchend', (e) => {
+      if (x0 == null || rd().mode === 'scroll') return;
+      const t = e.changedTouches[0], dx = t.clientX - x0, dy = t.clientY - y0;
+      x0 = null;
+      if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.2) { swiped = true; rdTurn(dx < 0 ? 1 : -1); }
+    });
+    view.addEventListener('click', (e) => {
+      if (swiped) { swiped = false; return; }
+      if (e.target.closest('button')) return;
+      if (rd().mode === 'scroll') return rdBare(!R.bare);
+      const r = view.getBoundingClientRect(), x = (e.clientX - r.left) / (r.width || 1);
+      if (x < 0.3) rdTurn(-1);
+      else if (x > 0.7) rdTurn(1);
+      else rdBare(!R.bare);
+    });
+    let st = null;
+    view.addEventListener('scroll', () => {
+      if (rd().mode !== 'scroll') return;
+      clearTimeout(st);
+      st = setTimeout(() => rdSync(), 120);
+      if (!R.bare && view.scrollTop > 40) rdBare(true);
+    }, { passive: true });
+  }
+  route(/^\/read$/, async () => {
+    const id = state.book ? state.book.id : await recentBookId();
+    if (!id) {
+      app.innerHTML = `<div class="screen"><h1>Lesen</h1><div class="empty">Noch kein Buch in der Bibliothek.</div><button class="btn solid big" data-act="add">${I.plus} EPUB laden</button></div>`;
+      return;
+    }
+    const book = await loadBook(id);
+    R.book = book;
+    R.bare = false;
+    const start = P.started && P.playing ? P.idx : state.progress.pos;
+    R.mark = start; R.idx = start;
+    app.innerHTML = `<div class="reader">
+      <div class="rd-top"><button class="rd-chap" data-act="rd-chap" aria-label="Kapitel wählen"><span id="rdtitle"></span>${I.chev}</button>
+        <button class="rd-aa" data-act="rd-aa" aria-label="Lesen einstellen">Aa</button></div>
+      <div class="rd-view" id="rdview"><div class="rd-text" id="rdtext" lang="de"></div></div>
+      <div class="rd-pillwrap" id="rdpill"><button class="rd-pill" data-act="rd-listen"><span class="startdot">${I.playS}</span>Ab hier hören</button></div>
+      <div class="rd-foot"><div class="rd-bar"><i id="rdbar"></i></div><div class="between small"><b id="rdpage"></b><span id="rdleft"></span></div></div>
+    </div>`;
+    rdStyle();
+    rdBindGestures();
+    try { await Promise.race([document.fonts.load(`400 20px ${(RD_FONTS.find((f) => f[0] === rd().font) || RD_FONTS[0])[2].split(',')[0]}`), new Promise((r) => setTimeout(r, 1200))]); } catch (e) {}
+    if (!$('.reader')) return;
+    rdLoad(book.sentences[start].s, start);
+  });
+  async function rdChooseChapter() {
+    const book = R.book;
+    const items = book.sections.map((s, i) => ({ s, i })).filter(({ s, i }) => s.chars > 300 || i === R.sec);
+    const res = await sheet(`<h2 class="label">Kapitel</h2><div>${items.map(({ s, i }) => `<button class="list-btn" data-v="${i}">
+      <span class="col" style="gap:2px;min-width:0"><span style="font-weight:${i === R.sec ? 700 : 500}">${esc(rdSecTitle(book, i).slice(0, 80))}</span>
+      <span class="small">${pageLabel(book, s.start)}</span></span>${I.chev}</button>`).join('')}</div>`);
+    if (res != null) { rdLoad(+res, book.sections[+res].start); }
+  }
+  function rdSettingsHtml() {
+    const o = rd();
+    const chips = (k, list) => list.map(([v, l, f]) => `<button class="rs-chip${o[k] === v ? ' on' : ''}" data-rs="${k}:${v}" aria-pressed="${o[k] === v}" ${f ? `style="font-family:${f.replace(/"/g, '&quot;')}"` : ''}>${l}</button>`).join('');
+    const sw = RD_BGS.map(([v, l]) => `<button class="rs-sw${o.bg === v ? ' on' : ''}" data-rs="bg:${v}" aria-pressed="${o.bg === v}"><span class="rs-dot rs-${v}">Aa</span>${l}</button>`).join('');
+    return `<h2 class="label">Lesen einstellen</h2>
+      <div class="rs-group"><span class="rs-l">Schrift</span><div class="rs-row">${chips('font', RD_FONTS)}</div></div>
+      <div class="rs-group"><span class="rs-l">Größe</span><div class="rs-row" style="align-items:center">
+        <button class="rs-step" data-rs="size:-1" aria-label="Kleiner" ${o.size <= 0 ? 'disabled' : ''}>A−</button>
+        <span class="rs-dots" aria-label="Stufe ${o.size + 1} von ${RD_SIZES.length}">${RD_SIZES.map((_, i) => `<i class="${i <= o.size ? 'on' : ''}" style="width:${8 + i * 2}px;height:${8 + i * 2}px"></i>`).join('')}</span>
+        <button class="rs-step big" data-rs="size:+1" aria-label="Größer" ${o.size >= RD_SIZES.length - 1 ? 'disabled' : ''}>A+</button></div></div>
+      <div class="rs-group"><span class="rs-l">Hintergrund</span><div class="rs-row">${sw}</div></div>
+      <div class="rs-group"><span class="rs-l">Seiten</span><div class="seg" role="radiogroup">${[['page', 'Blättern'], ['scroll', 'Scrollen']].map(([v, l]) => `<button role="radio" aria-checked="${o.mode === v}" class="${o.mode === v ? 'on' : ''}" data-rs="mode:${v}">${l}</button>`).join('')}</div></div>`;
+  }
+  function rdSettings() {
+    sheet(rdSettingsHtml());
+    const sh = document.querySelector('.overlay:last-of-type .sheet');
+    sh.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-rs]');
+      if (!b) return;
+      const [k, v] = b.dataset.rs.split(':');
+      const o = rd();
+      if (k === 'size') o.size = Math.max(0, Math.min(RD_SIZES.length - 1, o.size + (+v)));
+      else o[k] = v;
+      S.reader = o;
+      saveSettings();
+      const grab = sh.querySelector('.grabber');
+      sh.innerHTML = rdSettingsHtml();
+      if (grab) sh.prepend(grab);
+      rdRelayout();
+    });
+  }
+  // Liegt der markierte Satz („hier warst du“) auf der sichtbaren Seite, geht es dort weiter
+  function rdOnScreen(idx) {
+    const text = $('#rdtext'), view = $('#rdview'), el = text && text.querySelector(`[data-i="${idx}"]`);
+    if (!el) return false;
+    if (rd().mode === 'scroll') { const r = el.getBoundingClientRect(), v = view.getBoundingClientRect(); return r.bottom > v.top && r.top < v.bottom; }
+    return rdPageOf(idx) === R.page;
+  }
+  function rdListen() {
+    if (rdLive()) return;
+    const idx = R.mark != null && R.mark >= R.idx && rdOnScreen(R.mark) ? R.mark : R.idx;
+    state.progress.pos = idx;
+    if (P.started) { P.idx = idx; P.chunk = null; }
+    return beginSession(idx);
+  }
 
   // ---------------- Vorlese-Engine ----------------
   const P = {
@@ -1599,6 +1862,10 @@
       case 'open': state.book = null; return go('#/book/' + el.dataset.id);
       case 'timer': S.timer = el.dataset.v === 'sec' ? 'sec' : parseInt(el.dataset.v, 10); saveSettings(); return render();
       case 'sections': return chooseSection();
+      case 'rd-aa': return rdSettings();
+      case 'rd-chap': return rdChooseChapter();
+      case 'rd-listen': return rdListen();
+      case 'rd-nextsec': return rdLoad(R.sec + 1, R.book.sections[R.sec + 1].start);
       case 'copy-last': return copy(T(book.sentences[state.progress.last]));
       case 'copy-cur': return copy(T(book.sentences[P.idx]));
       case 'pages': {
