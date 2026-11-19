@@ -863,7 +863,7 @@
     const q = P.lastQuote;
     const n = q.to - q.from + 1;
     bar.innerHTML = `<div class="markbar" role="status"><span class="row" style="gap:8px">${I.heart}<span class="col" style="gap:0"><b>Gemerkt · ${n === 1 ? '1 Satz' : n + ' Sätze'}</b><span class="small">Tipp im Text auf weitere Sätze, um sie dazuzunehmen</span></span></span>
-      <button class="btn" data-act="mark-undo">Rückgängig</button></div>`;
+      <span class="row" style="gap:6px;flex-shrink:0"><button class="btn" data-act="mark-undo">Rückgängig</button><a class="btn" href="#/quotes/${esc(state.book.id)}" style="text-decoration:none">Ansehen</a></span></div>`;
     markTimer = setTimeout(() => { bar.innerHTML = ''; updatePlayerUi(); anchorText(); }, 20000 - (Date.now() - P.lastQuoteAt));
     anchorText();
   }

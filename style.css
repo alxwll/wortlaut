@@ -145,7 +145,9 @@ body:not(.has-mini) .mini { display: none; }
 .chip.mark.on { background: var(--accent); border-color: var(--accent); color: #2A160A; }
 .markbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--surface); border-radius: 16px; padding: 10px 10px 10px 14px; font-size: 14px; }
 .markbar svg { color: var(--accent); flex-shrink: 0; }
-.markbar .btn { height: 38px; padding: 0 12px; background: var(--bg); }
+.markbar .btn { height: 38px; padding: 0 12px; background: var(--bg); color: var(--text); }
+.markbar .small { display: none; }
+@media (min-width: 400px) { .markbar .small { display: inline; } }
 .screen.player #markbar:empty { display: none; }
 
 .jumpcur { position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); z-index: 2; display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 14px; border-radius: 20px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-size: 13px; font-weight: 600; box-shadow: 0 4px 14px rgba(0,0,0,.12); }
