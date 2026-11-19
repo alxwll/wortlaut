@@ -21,7 +21,7 @@
   const CHARS_PER_SEC = 15.5; // ungefähr bei Tempo 1,0
   const isHD = (v) => /DragonHD/.test(v || '');
   const S = Object.assign(
-    { code: '', ownKey: '', ownRegion: 'westeurope', voice: 'de-DE-SeraphinaMultilingualNeural', rate: 1, theme: 'auto', workerUrl: '', timer: 0, findMode: 'page' },
+    { code: '', ownKey: '', ownRegion: 'westeurope', voice: 'de-DE-SeraphinaMultilingualNeural', rate: 1, theme: 'auto', workerUrl: '', timer: 0, findMode: 'page', look: 'young' },
     JSON.parse(localStorage.getItem('wortlaut.settings') || '{}')
   );
   const saveSettings = () => localStorage.setItem('wortlaut.settings', JSON.stringify(S));
@@ -112,6 +112,8 @@
     return `<div class="cover ph ${cls}" style="background:${bg};color:${fg}">${esc(book.title)}</div>`;
   }
   const I = {
+    // Monogramm „w.“ mit klingendem Punkt (Logo von Wort. Laut.)
+    mono: '<svg width="32" height="32" viewBox="0 0 200 200" aria-hidden="true"><rect width="200" height="200" rx="46" fill="#141414"/><g transform="translate(7 3)"><path d="M37.1 123.0 22.0 60.7H41.8L49.5 108.1H51.9L61.4 60.7H84.0L93.9 108.1H96.4L103.7 60.7H123.1L108.0 123.0H81.8L73.2 76.0H71.0L63.0 123.0Z" fill="#DDF35B"/><path d="M151.1 99.2 A18 18 0 0 1 151.1 126.8" fill="none" stroke="#FF5B3A" stroke-width="7" stroke-linecap="round"/><path d="M158.1 90.8 A29 29 0 0 1 158.1 135.2" fill="none" stroke="#FF5B3A" stroke-width="7" stroke-linecap="round" opacity=".5"/><circle cx="139.5" cy="113" r="10" fill="#FF5B3A"/></g></svg>',
     heart: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 20.5l-1.4-1.3C5.6 14.7 2.5 11.9 2.5 8.4 2.5 5.6 4.7 3.5 7.4 3.5c1.6 0 3.1.7 4.6 2.2 1.5-1.5 3-2.2 4.6-2.2 2.7 0 4.9 2.1 4.9 4.9 0 3.5-3.1 6.3-8.1 10.8z"/></svg>',
     share: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M5 14v5h14v-5"/></svg>',
     dots: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>',
@@ -152,11 +154,14 @@
     const h = d.getHours() + d.getMinutes() / 60;
     return h < noon - ha / 15 - 0.3 || h > noon + ha / 15 + 0.3;
   }
+  const young = () => (S.look || 'young') === 'young';
   function applyTheme() {
-    const night = isNight();
+    const y = young();
+    const night = !y && isNight();
+    document.body.classList.toggle('look-young', y);
     document.body.classList.toggle('night', night);
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.content = night ? '#1C2433' : '#EFE9E1';
+    if (meta) meta.content = y ? '#FAF7F2' : night ? '#1C2433' : '#EFE9E1';
   }
 
   // ---------------- Zustand ----------------
@@ -241,7 +246,7 @@
     const recent = books.find((b) => prog[b.id] && prog[b.id].lastAt);
     let html = `<div class="screen">
       <div class="between">
-        <div class="col" style="gap:6px"><span class="brand">${I.logo}<span>Wort. Laut.</span></span><h1>Bibliothek</h1></div>
+        <div class="col" style="gap:6px">${young() ? `<span class="brand">${I.mono}<span class="wm">wort<b>.</b>laut<b>.</b></span></span><h1 class="yhead">Was hörst du <mark>heute</mark>?</h1>` : `<span class="brand">${I.logo}<span>Wort. Laut.</span></span><h1>Bibliothek</h1>`}</div>
         <div class="row" style="gap:8px">
           <button class="icon-btn" data-act="settings" aria-label="Einstellungen">${I.gear}</button>
           <button class="icon-btn" data-act="add" aria-label="EPUB hinzufügen">${I.plus}</button>
@@ -963,7 +968,49 @@
     await saveQuote(q);
     render();
   }
-  // Zitat als Bild im Story-Format (1080 × 1920) im Wort.-Laut.-Look
+  // Story-Karte im Look „Jung & mutig“: Flieder, fette Schrift, Textmarker, Monogramm
+  async function shareQuoteYoung(c, g, book, q, text) {
+    const W = 1080, H = 1920, pad = 100;
+    try { await document.fonts.load('800 60px "Bricolage Grotesque"'); await document.fonts.load('600 40px "Bricolage Grotesque"'); } catch (e) {}
+    g.fillStyle = '#C8B6FF'; g.fillRect(0, 0, W, H);
+    // Monogramm oben links
+    g.save(); g.translate(pad, 120); g.scale(0.9, 0.9);
+    g.fillStyle = '#141414'; g.beginPath(); g.roundRect ? g.roundRect(0, 0, 200, 200, 46) : g.rect(0, 0, 200, 200); g.fill();
+    g.translate(7, 3); g.fillStyle = '#DDF35B'; g.fill(new Path2D('M37.1 123.0 22.0 60.7H41.8L49.5 108.1H51.9L61.4 60.7H84.0L93.9 108.1H96.4L103.7 60.7H123.1L108.0 123.0H81.8L73.2 76.0H71.0L63.0 123.0Z'));
+    g.lineCap = 'round'; g.lineWidth = 7; g.strokeStyle = '#FF5B3A';
+    g.stroke(new Path2D('M151.1 99.2 A18 18 0 0 1 151.1 126.8')); g.globalAlpha = 0.5; g.stroke(new Path2D('M158.1 90.8 A29 29 0 0 1 158.1 135.2')); g.globalAlpha = 1;
+    g.fillStyle = '#FF5B3A'; g.beginPath(); g.arc(139.5, 113, 10, 0, Math.PI * 2); g.fill();
+    g.restore();
+    // großes Anführungszeichen
+    g.fillStyle = '#141414'; g.font = '800 260px "Bricolage Grotesque", sans-serif'; g.fillText('“', pad - 10, 560);
+    // Zitat umbrechen, Zeilen mit Textmarker hinterlegen
+    const wrap = (size) => {
+      g.font = `800 ${size}px "Bricolage Grotesque", sans-serif`;
+      const words = text.split(/\s+/), lines = [];
+      let line = '';
+      for (const w of words) { const t = line ? line + ' ' + w : w; if (g.measureText(t).width > W - pad * 2 - 20 && line) { lines.push(line); line = w; } else line = t; }
+      if (line) lines.push(line);
+      return lines;
+    };
+    let size = 88, lines = wrap(size);
+    while (lines.length * size * 1.28 > 980 && size > 36) { size -= 4; lines = wrap(size); }
+    const lh = size * 1.28;
+    let y = 620 + (980 - lines.length * lh) / 2 + size;
+    for (const l of lines) {
+      const w = g.measureText(l).width;
+      g.fillStyle = '#DDF35B'; g.fillRect(pad - 8, y - size * 0.92, w + 16, size * 1.16);
+      g.fillStyle = '#141414'; g.fillText(l, pad, y);
+      y += lh;
+    }
+    // Quelle und Marke
+    g.fillStyle = '#141414'; g.font = '800 46px "Bricolage Grotesque", sans-serif'; g.fillText(book.title.slice(0, 36), pad, 1720);
+    g.font = '500 36px "Bricolage Grotesque", sans-serif'; g.fillText(`${book.author ? book.author.slice(0, 36) + ' · ' : ''}S.${E.pageOf(book, q.from)}`, pad, 1776);
+    g.textAlign = 'right'; g.font = '800 40px "Bricolage Grotesque", sans-serif';
+    const mark = 'wort.laut.';
+    g.fillText(mark, W - pad, 1776);
+    return shareCanvas(c, `„${text}“ – ${book.title}`);
+  }
+  // Zitat als Bild im Story-Format (1080 × 1920) im Sand-Look
   async function shareQuote(qid) {
     const q = await findQuote(qid);
     const book = state.book;
@@ -973,6 +1020,7 @@
     const c = document.createElement('canvas');
     c.width = W; c.height = H;
     const g = c.getContext('2d');
+    if (young()) return shareQuoteYoung(c, g, book, q, text);
     try { await document.fonts.load('600 60px "Source Serif 4"'); await document.fonts.load('600 40px Figtree'); } catch (e) {}
     g.fillStyle = '#1C2433'; g.fillRect(0, 0, W, H);
     // Klangbögen über Buch (Logo) oben
@@ -1004,9 +1052,11 @@
     g.fillStyle = '#F1ECE4'; g.font = '600 44px Figtree, sans-serif'; g.fillText(book.title.slice(0, 40), pad, 1680);
     g.fillStyle = '#A9B1C2'; g.font = '400 36px Figtree, sans-serif'; g.fillText(`${book.author ? book.author.slice(0, 40) + ' · ' : ''}${pageLabel(book, q.from)}`, pad, 1736);
     g.fillStyle = '#A9B1C2'; g.font = '600 34px "Source Serif 4", serif'; g.textAlign = 'right'; g.fillText('Wort. Laut.', W - pad, 1736);
+    return shareCanvas(c, `„${text}“ – ${book.title}`);
+  }
+  async function shareCanvas(c, caption) {
     const blob = await new Promise((res) => c.toBlob(res, 'image/png'));
     const file = new File([blob], 'zitat.png', { type: 'image/png' });
-    const caption = `„${text}“ – ${book.title}`;
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       try { await navigator.share({ files: [file], text: caption }); return; } catch (e) { if (e && e.name === 'AbortError') return; }
     }
@@ -1046,6 +1096,15 @@
     const w = $('#sun');
     if (!w) return;
     const t = sunTexts();
+    if (young() && state.book) {
+      const book = state.book;
+      const frac = P.timer ? timerFraction() : null;
+      w.innerHTML = `<div class="ytop"><span class="ypage">S.${esc(String(E.pageOf(book, P.idx)))}</span><span class="ypct">${E.percentOf(book, P.idx)}%</span></div>
+        ${frac != null ? `<div class="ybar" role="img" aria-label="Sleep-Timer"><div style="width:${Math.round(frac * 100)}%"></div></div>` : ''}`;
+      const sub = $('#sunsub');
+      if (sub) sub.textContent = P.timer ? `${P.timer.mode === 'sec' ? '≈ ' : 'noch '}${fmtTime(timerLeftMs())} · ${t.sub.split(' · ').slice(1).join(' · ') || (P.playing ? '' : 'pausiert')}` : (P.playing ? `${fmtTime(P.sessionMs)} gehört` : 'Pausiert');
+      return;
+    }
     w.innerHTML = sunSvg(P.timer ? timerFraction() : null) + `<span class="sun-time ${t.word ? 'word' : ''}">${esc(t.big)}</span>`;
     const sub = $('#sunsub');
     if (sub) sub.textContent = t.sub;
@@ -1188,8 +1247,8 @@
     const mins = Math.max(1, Math.round(P.sessionMs / 60000));
     const night = document.body.classList.contains('night');
     const sentence = T(book.sentences[p.last]);
-    app.innerHTML = `<div class="screen">
-      <svg viewBox="0 0 342 120" role="img" aria-label="Die Sonne ist untergegangen" style="width:100%;height:auto">
+    app.innerHTML = `<div class="screen stopped">
+      <svg class="sunset-art" viewBox="0 0 342 120" role="img" aria-label="Die Sonne ist untergegangen" style="width:100%;height:auto">
         <g fill="var(--star)"><circle cx="40" cy="20" r="1.3"/><circle cx="98" cy="48" r="1"/><circle cx="150" cy="14" r="1.5"/><circle cx="214" cy="40" r="1"/><circle cx="262" cy="10" r="1.2"/><circle cx="300" cy="56" r="0.9"/></g>
         <path d="M291 104 A20 20 0 0 1 331 104 Z" fill="var(--accent)" opacity="0.18"/><path d="M299 104 A12 12 0 0 1 323 104 Z" fill="var(--accent)" opacity="0.6"/>
         <line x1="0" y1="104" x2="342" y2="104" stroke="var(--line)" stroke-width="1.5"/></svg>
@@ -1227,7 +1286,9 @@
         <button class="btn" data-act="testvoice">${I.playS} Probehören</button>
       </div>
       <div class="card"><span class="label">Darstellung</span>
-        <div class="chips">${[['auto', 'Nach Sonnenstand'], ['day', 'Hell'], ['night', 'Dunkel']].map(([v, l]) => `<button class="chip ${S.theme === v ? 'on' : ''}" data-act="theme" data-v="${v}">${l}</button>`).join('')}</div>
+        <div class="chips">${[['young', 'Jung & mutig'], ['sand', 'Sand']].map(([v, l]) => `<button class="chip ${(S.look || 'young') === v ? 'on' : ''}" data-act="look" data-v="${v}">${l}</button>`).join('')}</div>
+        ${young() ? '<span class="small">Kräftige Farben, Player in Schwarz.</span>' : `<span class="small">Ruhig, mit Sonnen-Timer. Hell oder dunkel:</span>
+        <div class="chips">${[['auto', 'Nach Sonnenstand'], ['day', 'Hell'], ['night', 'Dunkel']].map(([v, l]) => `<button class="chip ${S.theme === v ? 'on' : ''}" data-act="theme" data-v="${v}">${l}</button>`).join('')}</div>`}
       </div>
       <details class="card"><summary class="label" style="cursor:pointer">Eigener Azure-Schlüssel (optional)</summary>
         <p class="small" style="line-height:1.5;margin:4px 0 0">Mit eigenem Schlüssel hörst du über dein eigenes Azure-Konto statt über ein geteiltes Kontingent. Der Schlüssel bleibt auf diesem Gerät und wird nur zum Vorlesen durchgereicht.</p>
@@ -1486,6 +1547,7 @@
       case 'clearkey': S.ownKey = ''; saveSettings(); return render();
       case 'setrate': S.rate = parseFloat(el.dataset.v); saveSettings(); P.cache.clear(); return render();
       case 'theme': S.theme = el.dataset.v; saveSettings(); return render();
+      case 'look': S.look = el.dataset.v; saveSettings(); return render();
       case 'testvoice': return testVoice();
       case 'ainvite': return shareInvite({ code: el.dataset.code });
       case 'ahours': {
