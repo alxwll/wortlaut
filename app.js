@@ -968,91 +968,181 @@
     await saveQuote(q);
     render();
   }
-  // Story-Karte im Look „Jung & mutig“: Flieder, fette Schrift, Textmarker, Monogramm
-  async function shareQuoteYoung(c, g, book, q, text) {
-    const W = 1080, H = 1920, pad = 100;
-    try { await document.fonts.load('800 60px "Bricolage Grotesque"'); await document.fonts.load('600 40px "Bricolage Grotesque"'); } catch (e) {}
-    g.fillStyle = '#C8B6FF'; g.fillRect(0, 0, W, H);
-    // Monogramm oben links
-    g.save(); g.translate(pad, 120); g.scale(0.9, 0.9);
-    g.fillStyle = '#141414'; g.beginPath(); g.roundRect ? g.roundRect(0, 0, 200, 200, 46) : g.rect(0, 0, 200, 200); g.fill();
-    g.translate(7, 3); g.fillStyle = '#DDF35B'; g.fill(new Path2D('M37.1 123.0 22.0 60.7H41.8L49.5 108.1H51.9L61.4 60.7H84.0L93.9 108.1H96.4L103.7 60.7H123.1L108.0 123.0H81.8L73.2 76.0H71.0L63.0 123.0Z'));
-    g.lineCap = 'round'; g.lineWidth = 7; g.strokeStyle = '#FF5B3A';
-    g.stroke(new Path2D('M151.1 99.2 A18 18 0 0 1 151.1 126.8')); g.globalAlpha = 0.5; g.stroke(new Path2D('M158.1 90.8 A29 29 0 0 1 158.1 135.2')); g.globalAlpha = 1;
-    g.fillStyle = '#FF5B3A'; g.beginPath(); g.arc(139.5, 113, 10, 0, Math.PI * 2); g.fill();
-    g.restore();
-    // großes Anführungszeichen
-    g.fillStyle = '#141414'; g.font = '800 260px "Bricolage Grotesque", sans-serif'; g.fillText('“', pad - 10, 560);
-    // Zitat umbrechen, Zeilen mit Textmarker hinterlegen
+  // ---------- Zitat-Studio: Story-Karte (1080 × 1920) mit Farbe und Stil ----------
+  const CARD_BGS = {
+    young: [
+      { k: 'flieder', n: 'Flieder', bg: '#C8B6FF', ink: '#141414', mark: '#DDF35B', markInk: '#141414', alt: '#4B2BD6', tile: '#141414' },
+      { k: 'limette', n: 'Limette', bg: '#DDF35B', ink: '#141414', mark: '#C8B6FF', markInk: '#141414', alt: '#4B2BD6', tile: '#141414' },
+      { k: 'rot', n: 'Orange-Rot', bg: '#FF5B3A', ink: '#141414', mark: '#FAF7F2', markInk: '#141414', alt: '#FAF7F2', tile: '#141414', dot: '#141414' },
+      { k: 'creme', n: 'Creme', bg: '#FAF7F2', ink: '#141414', mark: '#DDF35B', markInk: '#141414', alt: '#FF5B3A', tile: '#141414' },
+      { k: 'schwarz', n: 'Schwarz', bg: '#141414', ink: '#FAF7F2', mark: '#DDF35B', markInk: '#141414', alt: '#DDF35B', tile: '#2A2A2A' },
+    ],
+    sand: [
+      { k: 'nacht', n: 'Nacht', bg: '#1C2433', ink: '#F1ECE4', mark: '#E8A35C', markInk: '#1C2433', alt: '#E8A35C', logo: '#E8A35C' },
+      { k: 'sand', n: 'Sand', bg: '#F1ECE4', ink: '#1C2433', mark: '#F3CF9E', markInk: '#1C2433', alt: '#B8642A', logo: '#C8692E' },
+      { k: 'abendrot', n: 'Abendrot', bg: '#E8A35C', ink: '#1C2433', mark: '#F1ECE4', markInk: '#1C2433', alt: '#7A2E12', logo: '#1C2433' },
+    ],
+  };
+  const CARD_STYLES = [['mark', 'Markiert'], ['akzent', 'Akzent'], ['zwei', 'Zweifarbig']];
+  const rrect = (g, x, y, w, h, r) => { g.beginPath(); if (g.roundRect) g.roundRect(x, y, w, h, r); else g.rect(x, y, w, h); };
+  // Wörter des Zitats mit Kennzeichnung, welcher Teil hervorgehoben wird
+  function quoteTokens(book, q, style) {
+    const sents = [];
+    for (let k = q.from; k <= q.to; k++) sents.push(T(book.sentences[k]).split(/\s+/).filter(Boolean));
+    let lead = [], tail = [];
+    if (style === 'mark') tail = sents.flat();
+    else if (sents.length > 1) { lead = sents.slice(0, -1).flat(); tail = sents[sents.length - 1]; }
+    else {
+      // ein Satz: ab dem letzten Komma/Gedankenstrich hervorheben, sonst die zweite Hälfte
+      const w = sents[0] || [];
+      let cut = -1;
+      for (let i = w.length - 4; i > 0; i--) if (/[,;:–—]$/.test(w[i - 1]) || /^[–—]$/.test(w[i])) { cut = i; break; }
+      if (cut < 0) cut = Math.floor(w.length / 2);
+      lead = w.slice(0, cut); tail = w.slice(cut);
+    }
+    return [...lead.map((w) => ({ w, hi: false })), ...tail.map((w) => ({ w, hi: true }))];
+  }
+  async function drawCard(c, book, q, look, bgKey, style) {
+    const W = 1080, g = c.getContext('2d');
+    const pal = CARD_BGS[look].find((b) => b.k === bgKey) || CARD_BGS[look][0];
+    const yl = look === 'young';
+    const font = yl ? '"Bricolage Grotesque", sans-serif' : '"Source Serif 4", Georgia, serif';
+    const weight = yl ? 800 : 600;
+    const pad = yl ? 100 : 110;
+    try {
+      if (yl) { await document.fonts.load('800 60px "Bricolage Grotesque"'); await document.fonts.load('500 40px "Bricolage Grotesque"'); }
+      else { await document.fonts.load('600 60px "Source Serif 4"'); await document.fonts.load('600 40px Figtree'); }
+    } catch (e) {}
+    g.setTransform(1, 0, 0, 1, 0, 0); g.textAlign = 'left'; g.globalAlpha = 1;
+    g.fillStyle = pal.bg; g.fillRect(0, 0, W, 1920);
+    // Logo oben
+    if (yl) {
+      g.save(); g.translate(pad, 120); g.scale(0.9, 0.9);
+      g.fillStyle = pal.tile; rrect(g, 0, 0, 200, 200, 46); g.fill();
+      g.translate(7, 3); g.fillStyle = '#DDF35B'; g.fill(new Path2D('M37.1 123.0 22.0 60.7H41.8L49.5 108.1H51.9L61.4 60.7H84.0L93.9 108.1H96.4L103.7 60.7H123.1L108.0 123.0H81.8L73.2 76.0H71.0L63.0 123.0Z'));
+      g.lineCap = 'round'; g.lineWidth = 7; g.strokeStyle = '#FF5B3A';
+      g.stroke(new Path2D('M151.1 99.2 A18 18 0 0 1 151.1 126.8')); g.globalAlpha = 0.5; g.stroke(new Path2D('M158.1 90.8 A29 29 0 0 1 158.1 135.2')); g.globalAlpha = 1;
+      g.fillStyle = '#FF5B3A'; g.beginPath(); g.arc(139.5, 113, 10, 0, Math.PI * 2); g.fill();
+      g.restore();
+    } else {
+      g.lineCap = 'round';
+      [[44, 1], [84, 0.6], [124, 0.3]].forEach(([r, o]) => { g.globalAlpha = o; g.strokeStyle = pal.logo; g.lineWidth = 16; g.beginPath(); g.arc(W / 2, 330, r, Math.PI, 0); g.stroke(); });
+      g.globalAlpha = 1; g.strokeStyle = pal.ink; g.lineWidth = 18;
+      g.beginPath(); g.moveTo(W / 2 - 136, 366); g.quadraticCurveTo(W / 2 - 68, 338, W / 2, 370); g.quadraticCurveTo(W / 2 + 68, 338, W / 2 + 136, 366); g.stroke();
+    }
+    // Text: im jungen Look großes Anführungszeichen, im Sand-Look „…“ im Text
+    const tokens = quoteTokens(book, q, style);
+    if (!yl && tokens.length) { tokens[0] = { ...tokens[0], w: '„' + tokens[0].w }; const l = tokens.length - 1; tokens[l] = { ...tokens[l], w: tokens[l].w + '“' }; }
+    if (yl) { g.fillStyle = style === 'zwei' ? pal.alt : pal.ink; g.font = `800 260px ${font}`; g.fillText('“', pad - 10, 560); }
+    const top = yl ? 620 : 520, boxH = yl ? 980 : 1000, maxW = W - pad * 2 - 20;
     const wrap = (size) => {
-      g.font = `800 ${size}px "Bricolage Grotesque", sans-serif`;
-      const words = text.split(/\s+/), lines = [];
-      let line = '';
-      for (const w of words) { const t = line ? line + ' ' + w : w; if (g.measureText(t).width > W - pad * 2 - 20 && line) { lines.push(line); line = w; } else line = t; }
-      if (line) lines.push(line);
-      return lines;
+      g.font = `${weight} ${size}px ${font}`;
+      const sp = g.measureText(' ').width, lines = [];
+      let line = [], lw = 0;
+      for (const t of tokens) {
+        const w = g.measureText(t.w).width;
+        if (line.length && lw + sp + w > maxW) { lines.push(line); line = []; lw = 0; }
+        lw += (line.length ? sp : 0) + w; line.push({ ...t, width: w });
+      }
+      if (line.length) lines.push(line);
+      return { lines, sp };
     };
-    let size = 88, lines = wrap(size);
-    while (lines.length * size * 1.28 > 980 && size > 36) { size -= 4; lines = wrap(size); }
-    const lh = size * 1.28;
-    let y = 620 + (980 - lines.length * lh) / 2 + size;
-    for (const l of lines) {
-      const w = g.measureText(l).width;
-      g.fillStyle = '#DDF35B'; g.fillRect(pad - 8, y - size * 0.92, w + 16, size * 1.16);
-      g.fillStyle = '#141414'; g.fillText(l, pad, y);
+    const lhF = yl ? 1.3 : 1.34;
+    let size = yl ? 108 : 92, L = wrap(size);
+    while (L.lines.length * size * lhF > boxH && size > 34) { size -= 4; L = wrap(size); }
+    const lh = size * lhF;
+    let y = top + (boxH - L.lines.length * lh) / 2 + size;
+    const useMark = style !== 'zwei';
+    for (const line of L.lines) {
+      // Marker-Flächen für zusammenhängende hervorgehobene Wörter
+      let x = pad;
+      const pos = line.map((t) => { const p = x; x += t.width + L.sp; return p; });
+      if (useMark) {
+        g.fillStyle = pal.mark;
+        let i = 0;
+        while (i < line.length) {
+          if (!line[i].hi) { i++; continue; }
+          let j = i; while (j + 1 < line.length && line[j + 1].hi) j++;
+          const x0 = pos[i] - size * 0.12, x1 = pos[j] + line[j].width + size * 0.12;
+          rrect(g, x0, y - size * 0.9, x1 - x0, size * 1.16, size * 0.14); g.fill();
+          i = j + 1;
+        }
+      }
+      line.forEach((t, k) => {
+        g.fillStyle = t.hi ? (useMark ? pal.markInk : pal.alt) : pal.ink;
+        g.fillText(t.w, pos[k], y);
+      });
       y += lh;
     }
     // Quelle und Marke
-    g.fillStyle = '#141414'; g.font = '800 46px "Bricolage Grotesque", sans-serif'; g.fillText(book.title.slice(0, 36), pad, 1720);
-    g.font = '500 36px "Bricolage Grotesque", sans-serif'; g.fillText(`${book.author ? book.author.slice(0, 36) + ' · ' : ''}S.${E.pageOf(book, q.from)}`, pad, 1776);
-    g.textAlign = 'right'; g.font = '800 40px "Bricolage Grotesque", sans-serif';
-    const mark = 'wort.laut.';
-    g.fillText(mark, W - pad, 1776);
-    return shareCanvas(c, `„${text}“ – ${book.title}`);
+    const src = `${book.author ? book.author.slice(0, 36) + ' · ' : ''}${pageLabel(book, q.from)}`;
+    if (yl) {
+      g.fillStyle = pal.ink; g.font = `800 46px ${font}`; g.fillText(book.title.slice(0, 36), pad, 1720);
+      g.font = `500 36px ${font}`; g.fillText(src, pad, 1776);
+      g.textAlign = 'right'; g.font = `800 40px ${font}`;
+      const dot = pal.dot || '#FF5B3A', right = W - pad;
+      const wDot = g.measureText('.').width, wLaut = g.measureText('laut').width;
+      g.fillStyle = dot; g.fillText('.', right, 1776);
+      g.fillStyle = pal.ink; g.fillText('laut', right - wDot, 1776);
+      g.fillStyle = dot; g.fillText('.', right - wDot - wLaut, 1776);
+      g.fillStyle = pal.ink; g.fillText('wort', right - 2 * wDot - wLaut, 1776);
+    } else {
+      g.fillStyle = pal.logo; g.fillRect(pad, 1600, 80, 6);
+      g.fillStyle = pal.ink; g.font = '600 44px Figtree, sans-serif'; g.fillText(book.title.slice(0, 40), pad, 1680);
+      g.globalAlpha = 0.7; g.font = '400 36px Figtree, sans-serif'; g.fillText(src, pad, 1736);
+      g.font = `600 34px ${font}`; g.textAlign = 'right'; g.fillText('Wort. Laut.', W - pad, 1736); g.globalAlpha = 1;
+    }
+    g.textAlign = 'left';
   }
-  // Zitat als Bild im Story-Format (1080 × 1920) im Sand-Look
+  // Studio öffnen: Vorschau, Hintergrund, Stil, Speichern/Teilen
   async function shareQuote(qid) {
     const q = await findQuote(qid);
     const book = state.book;
     if (!q || !book) return;
-    const text = quoteText(book, q);
-    const W = 1080, H = 1920, pad = 110;
+    const look = young() ? 'young' : 'sand';
+    const bgs = CARD_BGS[look];
+    const bgKey = () => (bgs.some((b) => b.k === S['shareBg_' + look]) ? S['shareBg_' + look] : bgs[0].k);
+    const styleKey = () => (CARD_STYLES.some(([k]) => k === S.shareStyle) ? S.shareStyle : 'akzent');
     const c = document.createElement('canvas');
-    c.width = W; c.height = H;
-    const g = c.getContext('2d');
-    if (young()) return shareQuoteYoung(c, g, book, q, text);
-    try { await document.fonts.load('600 60px "Source Serif 4"'); await document.fonts.load('600 40px Figtree'); } catch (e) {}
-    g.fillStyle = '#1C2433'; g.fillRect(0, 0, W, H);
-    // Klangbögen über Buch (Logo) oben
-    g.lineCap = 'round';
-    [[44, 1], [84, 0.6], [124, 0.3]].forEach(([r, o]) => { g.globalAlpha = o; g.strokeStyle = '#E8A35C'; g.lineWidth = 16; g.beginPath(); g.arc(W / 2, 330, r, Math.PI, 0); g.stroke(); });
-    g.globalAlpha = 1; g.strokeStyle = '#F1ECE4'; g.lineWidth = 18;
-    g.beginPath(); g.moveTo(W / 2 - 136, 366); g.quadraticCurveTo(W / 2 - 68, 338, W / 2, 370); g.quadraticCurveTo(W / 2 + 68, 338, W / 2 + 136, 366); g.stroke();
-    // Zitat umbrechen und so groß wie möglich setzen
-    const wrap = (size) => {
-      g.font = `600 ${size}px "Source Serif 4", Georgia, serif`;
-      const words = ('„' + text + '“').split(/\s+/);
-      const lines = [];
-      let line = '';
-      for (const w of words) {
-        const t = line ? line + ' ' + w : w;
-        if (g.measureText(t).width > W - pad * 2 && line) { lines.push(line); line = w; } else line = t;
-      }
-      if (line) lines.push(line);
-      return lines;
-    };
-    let size = 76, lines = wrap(size);
-    while (lines.length * size * 1.32 > 1000 && size > 34) { size -= 4; lines = wrap(size); }
-    const lh = size * 1.32;
-    let y = 520 + (1000 - lines.length * lh) / 2 + size;
-    g.fillStyle = '#F1ECE4';
-    for (const l of lines) { g.fillText(l, pad, y); y += lh; }
-    // Quelle
-    g.fillStyle = '#E8A35C'; g.fillRect(pad, 1600, 80, 6);
-    g.fillStyle = '#F1ECE4'; g.font = '600 44px Figtree, sans-serif'; g.fillText(book.title.slice(0, 40), pad, 1680);
-    g.fillStyle = '#A9B1C2'; g.font = '400 36px Figtree, sans-serif'; g.fillText(`${book.author ? book.author.slice(0, 40) + ' · ' : ''}${pageLabel(book, q.from)}`, pad, 1736);
-    g.fillStyle = '#A9B1C2'; g.font = '600 34px "Source Serif 4", serif'; g.textAlign = 'right'; g.fillText('Wort. Laut.', W - pad, 1736);
-    return shareCanvas(c, `„${text}“ – ${book.title}`);
+    c.width = 1080; c.height = 1920; c.className = 'studio-card';
+    c.setAttribute('role', 'img'); c.setAttribute('aria-label', 'Vorschau der Zitat-Karte');
+    const ov = document.createElement('div');
+    ov.className = 'studio';
+    ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', 'Zitat als Story teilen');
+    const controls = () => `
+      <div class="studio-group"><span class="studio-label">Hintergrund</span>
+        <div class="swatches" role="radiogroup" aria-label="Hintergrundfarbe">${bgs.map((b) => `<button role="radio" aria-checked="${b.k === bgKey()}" aria-label="${b.n}" data-sbg="${b.k}" style="background:${b.bg}"></button>`).join('')}</div></div>
+      <div class="studio-group"><span class="studio-label">Stil</span>
+        <div class="seg studio-seg" role="radiogroup" aria-label="Stil des Zitats">${CARD_STYLES.map(([k, l]) => `<button role="radio" aria-checked="${k === styleKey()}" class="${k === styleKey() ? 'on' : ''}" data-sst="${k}">${l}</button>`).join('')}</div></div>`;
+    ov.innerHTML = `<div class="studio-top"><button class="studio-x" data-sx aria-label="Schließen"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button><b>Als Story teilen</b><span style="width:44px"></span></div>
+      <div class="studio-stage"></div>
+      <div class="studio-ctrl">${controls()}</div>
+      <div class="studio-actions"><button class="studio-btn" data-ssave>Bild speichern</button><button class="studio-btn main" data-sshare>${I.share} Teilen</button></div>`;
+    ov.querySelector('.studio-stage').appendChild(c);
+    document.body.appendChild(ov);
+    document.body.classList.add('studio-open');
+    const redraw = async () => { await drawCard(c, book, q, look, bgKey(), styleKey()); ov.querySelector('.studio-ctrl').innerHTML = controls(); };
+    const close = () => { ov.remove(); document.body.classList.remove('studio-open'); window.removeEventListener('hashchange', close); };
+    window.addEventListener('hashchange', close);
+    ov.addEventListener('click', async (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      if (b.hasAttribute('data-sx')) return close();
+      if (b.dataset.sbg) { S['shareBg_' + look] = b.dataset.sbg; saveSettings(); return redraw(); }
+      if (b.dataset.sst) { S.shareStyle = b.dataset.sst; saveSettings(); return redraw(); }
+      if (b.hasAttribute('data-ssave')) return saveCanvas(c);
+      if (b.hasAttribute('data-sshare')) return shareCanvas(c, `„${quoteText(book, q)}“ – ${book.title}`);
+    });
+    ov.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+    await redraw();
+    ov.querySelector('[data-sx]').focus();
+  }
+  async function saveCanvas(c) {
+    const blob = await new Promise((res) => c.toBlob(res, 'image/png'));
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'zitat.png';
+    document.body.appendChild(a); a.click(); a.remove();
+    toast('Bild gespeichert');
   }
   async function shareCanvas(c, caption) {
     const blob = await new Promise((res) => c.toBlob(res, 'image/png'));
@@ -1060,10 +1150,7 @@
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       try { await navigator.share({ files: [file], text: caption }); return; } catch (e) { if (e && e.name === 'AbortError') return; }
     }
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = 'zitat.png';
-    document.body.appendChild(a); a.click(); a.remove();
-    toast('Bild gespeichert');
+    return saveCanvas(c);
   }
 
   // ---------------- Player-Ansicht ----------------
