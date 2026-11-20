@@ -269,6 +269,42 @@ async function handleAdmin(request, env, path) {
   return json({ error: 'Nicht gefunden.' }, 404);
 }
 
+// Artikel holen: Browser dürfen fremde Seiten nicht direkt laden, der Worker schon.
+// Nur mit gültigem Zugang (oder eigenem Schlüssel), damit niemand den Worker als offenen Proxy nutzt.
+async function handleFetch(request, env) {
+  const user = await resolveUser(request, env);
+  if (!user && !request.headers.get('X-Azure-Key')) return json({ error: 'Kein gültiger Zugang – trag in den Einstellungen deinen Code ein.' }, 401);
+  if (user && user.paused) return json({ error: 'Dein Zugang ist gerade pausiert.' }, 403);
+  const target = new URL(request.url).searchParams.get('url') || '';
+  let u;
+  try { u = new URL(target); } catch (e) { return json({ error: 'Das ist kein gültiger Link.' }, 400); }
+  if (!/^https?:$/.test(u.protocol)) return json({ error: 'Nur http- und https-Links gehen.' }, 400);
+  let res;
+  try {
+    res = await fetch(u.toString(), {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5',
+        'Accept-Language': 'de-DE,de;q=0.9,en;q=0.7',
+      },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (e) {
+    return json({ error: 'Die Seite war nicht erreichbar.' }, 502);
+  }
+  if (!res.ok) return json({ error: `Die Seite hat nicht geantwortet (Fehler ${res.status}).` }, 502);
+  const type = (res.headers.get('content-type') || '').toLowerCase();
+  if (type.includes('pdf')) return json({ error: 'Das ist ein PDF – lade es bitte als Datei hoch.', code: 'pdf' }, 415);
+  if (!/html|xml|text\/plain/.test(type)) return json({ error: 'Unter diesem Link liegt kein lesbarer Text.' }, 415);
+  const buf = await res.arrayBuffer();
+  if (buf.byteLength > 5e6) return json({ error: 'Die Seite ist zu groß.' }, 413);
+  let html = new TextDecoder('utf-8').decode(buf);
+  const cs = ((type.match(/charset=([\w-]+)/) || [])[1] || (html.slice(0, 3000).match(/<meta[^>]+charset=["']?([\w-]+)/i) || [])[1] || 'utf-8').toLowerCase();
+  if (cs !== 'utf-8' && cs !== 'utf8') { try { html = new TextDecoder(cs).decode(buf); } catch (e) {} }
+  return json({ url: res.url || u.toString(), type: type.includes('text/plain') ? 'text' : 'html', html });
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
@@ -277,6 +313,7 @@ export default {
       if (path === '/tts' && request.method === 'POST') return await handleTts(request, env);
       if (path === '/voices' && request.method === 'GET') return await handleVoices(request, env);
       if (path === '/me' && request.method === 'GET') return await handleMe(request, env);
+      if (path === '/fetch' && request.method === 'GET') return await handleFetch(request, env);
       if (path.startsWith('/admin/')) return await handleAdmin(request, env, path);
       if (path === '/') return json({ ok: true, app: 'wortlaut' });
       return json({ error: 'Nicht gefunden.' }, 404);

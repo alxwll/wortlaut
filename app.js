@@ -104,6 +104,7 @@
   function hash(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h); }
   const coverUrls = new Map();
   function coverHtml(book, cls = '') {
+    if (book.kind) return `<div class="cover ph leafcover k-${book.kind} ${cls}" aria-label="${esc(book.title)}">${I[book.kind === 'link' ? 'link' : book.kind === 'pdf' ? 'pdf' : 'txt']}<span>${esc(book.title.slice(0, 60))}</span></div>`;
     if (book.cover) {
       if (!coverUrls.has(book.id)) coverUrls.set(book.id, URL.createObjectURL(new Blob([book.cover.bytes], { type: book.cover.type })));
       return `<img class="cover ${cls}" src="${coverUrls.get(book.id)}" alt="Cover: ${esc(book.title)}">`;
@@ -112,6 +113,12 @@
     return `<div class="cover ph ${cls}" style="background:${bg};color:${fg}">${esc(book.title)}</div>`;
   }
   const I = {
+    shelf: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4v16M9 4v16M13.5 5l4.5 14.5"/></svg>',
+    link: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"/></svg>',
+    pdf: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8l5 5v13H6z"/><path d="M14 3v5h5"/></svg>',
+    txt: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 6h14M5 10h14M5 14h9M5 18h11"/></svg>',
+    clip: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="4" width="10" height="4" rx="1"/><path d="M8 6H6a1 1 0 0 0-1 1v13a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-2"/></svg>',
+    shareIn: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg>',
     book: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5.5c3-1.3 6-1.3 9 .7 3-2 6-2 9-.7V19c-3-1.3-6-1.3-9 .7-3-2-6-2-9-.7z"/><path d="M12 6.2v13.5"/></svg>',
     // Monogramm „w.“ mit klingendem Punkt (Logo von Wort. Laut.)
     mono: '<svg width="32" height="32" viewBox="0 0 200 200" aria-hidden="true"><rect width="200" height="200" rx="46" fill="#141414"/><g transform="translate(7 3)"><path d="M37.1 123.0 22.0 60.7H41.8L49.5 108.1H51.9L61.4 60.7H84.0L93.9 108.1H96.4L103.7 60.7H123.1L108.0 123.0H81.8L73.2 76.0H71.0L63.0 123.0Z" fill="#DDF35B"/><path d="M151.1 99.2 A18 18 0 0 1 151.1 126.8" fill="none" stroke="#FF5B3A" stroke-width="7" stroke-linecap="round"/><path d="M158.1 90.8 A29 29 0 0 1 158.1 135.2" fill="none" stroke="#FF5B3A" stroke-width="7" stroke-linecap="round" opacity=".5"/><circle cx="139.5" cy="113" r="10" fill="#FF5B3A"/></g></svg>',
@@ -242,7 +249,7 @@
 
   // ---------------- Bibliothek ----------------
   route(/^\/$/, async () => {
-    const books = await dbAll('books');
+    let books = await dbAll('books');
     const prog = Object.fromEntries((await dbAll('progress')).map((p) => [p.id, p]));
     books.sort((a, b) => ((prog[b.id] && prog[b.id].lastAt) || b.addedAt || '').localeCompare((prog[a.id] && prog[a.id].lastAt) || a.addedAt || ''));
     const recent = books.find((b) => prog[b.id] && prog[b.id].lastAt);
@@ -251,7 +258,7 @@
         <div class="col" style="gap:6px">${young() ? `<span class="brand">${I.mono}<span class="wm">wort<b>.</b>laut<b>.</b></span></span><h1 class="yhead">Was hörst du <mark>heute</mark>?</h1>` : `<span class="brand">${I.logo}<span>Wort. Laut.</span></span><h1>Bibliothek</h1>`}</div>
         <div class="row" style="gap:8px">
           <button class="icon-btn" data-act="settings" aria-label="Einstellungen">${I.gear}</button>
-          <button class="icon-btn" data-act="add" aria-label="EPUB hinzufügen">${I.plus}</button>
+          <button class="icon-btn" data-act="add" aria-label="Hinzufügen">${I.plus}</button>
         </div>
       </div>`;
     if (recent) {
@@ -273,22 +280,386 @@
           <button class="btn solid" data-act="play-book" data-id="${esc(recent.id)}">${I.playS} Weiterhören</button></div>
       </div>`;
     }
-    html += `<div class="col" style="gap:14px"><h2 class="label">Im Regal</h2>`;
-    if (!books.length) {
-      html += `<div class="empty">Noch keine Bücher.<br>Lade eine EPUB-Datei, um loszulegen.</div>
-        <button class="btn solid big" data-act="add">${I.plus} EPUB laden</button>`;
+    const leaves = books.filter((b) => b.kind && !b.archived), archived = books.filter((b) => b.kind && b.archived);
+    const allBooks = books;
+    books = books.filter((b) => !b.kind);
+    html += `<div class="col" style="gap:14px"><h2 class="label">${young() ? 'Deine Bücher' : 'Im Regal'}</h2>`;
+    if (!books.length && allBooks.length) {
+      html += `<div class="shelf"><div class="book-tile"><button class="add-tile" data-act="add">${I.plus}Hinzufügen</button><span class="small" aria-hidden="true">&nbsp;</span></div></div>`;
+    } else if (!books.length) {
+      html += `<div class="empty">Noch nichts im Regal.<br>Lade ein E-Book, ein PDF, einen Link oder einen Text.</div>
+        <button class="btn solid big" data-act="add">${I.plus} Hinzufügen</button>`;
     } else {
       html += `<div class="shelf">${books.map((b) => {
         const p = prog[b.id];
         const pct = p && p.lastAt ? E.percentOf(b, p.pos) : null;
         return `<button class="book-tile" data-act="open" data-id="${esc(b.id)}" aria-label="${esc(b.title)} öffnen">${coverHtml(b)}<span class="small">${pct == null ? 'Neu' : pct + ' %'}</span></button>`;
-      }).join('')}<div class="book-tile"><button class="add-tile" data-act="add">${I.plus}EPUB laden</button><span class="small" aria-hidden="true">&nbsp;</span></div></div>`;
+      }).join('')}<div class="book-tile"><button class="add-tile" data-act="add">${I.plus}Hinzufügen</button><span class="small" aria-hidden="true">&nbsp;</span></div></div>`;
     }
     html += `</div>`;
+    if (leaves.length || archived.length) {
+      html += `<div class="col" style="gap:12px"><div class="between"><h2 class="label">Lose Blätter</h2>${leaves.length ? '<span class="small">Gehörtes nach links wischen</span>' : ''}</div>
+        ${leaves.map((b) => leafCard(b, prog, false)).join('')}
+        ${archived.length ? `<button class="btn link" style="align-self:flex-start" data-act="toggle-archive">${state.showArchive ? 'Archiv ausblenden' : `Archiv · ${archived.length}`}</button>` : ''}
+        ${state.showArchive ? archived.map((b) => leafCard(b, prog, true)).join('') : ''}</div>`;
+    }
     if (!hasCloudVoice()) html += `<div class="banner">Noch ohne Vorlesestimme aus der Cloud – es liest die einfache Handy-Stimme. <a href="#/settings">Zugang eintragen</a></div>`;
     html += `</div>`;
     app.innerHTML = html;
+    bindLeafSwipes();
   });
+
+  // ---------------- Lose Blätter: Links, Texte, PDFs ----------------
+  const LEAF_KINDS = { link: 'Link', text: 'Text', pdf: 'PDF' };
+  const isLeaf = (b) => !!(b && b.kind);
+  // Sprache für Azure im Format xx-YY (nur wenn nicht Deutsch)
+  function ttsLang(l) {
+    l = String(l || '').trim();
+    if (!l || /^de/i.test(l)) return null;
+    if (/^[a-z]{2}-[A-Z]{2}$/.test(l)) return l;
+    const map = { en: 'en-US', fr: 'fr-FR', es: 'es-ES', it: 'it-IT', nl: 'nl-NL', pt: 'pt-PT', pl: 'pl-PL', sv: 'sv-SE', da: 'da-DK', tr: 'tr-TR' };
+    return map[l.slice(0, 2).toLowerCase()] || null;
+  }
+  const leafMinutes = (b) => Math.max(1, Math.round(b.totalChars / CHARS_PER_SEC / 60 / (S.rate || 1)));
+  const leafWords = (b) => b.sentences.reduce((n, s) => n + T(s).split(/\s+/).filter(Boolean).length, 0);
+  function leafMeta(b) {
+    if (b.kind === 'pdf' && b.pageMarks) return `${b.pageMarks[b.pageMarks.length - 1].l} Seiten · ${leafMinutes(b)} min`;
+    return `${leafMinutes(b)} min`;
+  }
+  const hostOf = (url) => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch (e) { return ''; } };
+  // Text aus einem Artikel-DOM in Absätze zerlegen
+  function blocksFromDom(root, lang) {
+    const out = [];
+    const walk = (el) => {
+      for (const n of el.children) {
+        const tag = n.tagName.toLowerCase();
+        if (/^(script|style|figure|figcaption|nav|aside|form|button|table|svg|noscript)$/.test(tag)) continue;
+        if (/^h[1-6]$/.test(tag)) { out.push({ text: n.textContent, heading: true, lang }); continue; }
+        if (/^(p|li|blockquote|pre|dd|dt)$/.test(tag) && !n.querySelector('p, li, blockquote')) { out.push({ text: n.textContent, lang }); continue; }
+        if (n.children.length) walk(n);
+        else if (n.textContent.trim().length > 40) out.push({ text: n.textContent, lang });
+      }
+    };
+    walk(root);
+    return out.filter((b) => b.text && b.text.trim());
+  }
+  function blocksFromText(text) {
+    return String(text).replace(/\r/g, '').split(/\n\s*\n|\n(?=\s*[-•*]\s)/).map((t) => ({ text: t.replace(/\n/g, ' ') })).filter((b) => b.text.trim());
+  }
+  function loadScript(src) {
+    return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('Konnte ' + src + ' nicht laden.')); document.head.appendChild(s); });
+  }
+  async function fetchArticle(url) {
+    if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+    if (!workerUrl()) throw new Error('Zum Laden von Links braucht die App den Server (Einstellungen → Zugang & Server).');
+    const data = await api('/fetch?url=' + encodeURIComponent(url), { method: 'GET' });
+    const finalUrl = data.url || url;
+    if (data.type === 'text') {
+      const blocks = blocksFromText(data.html);
+      return { kind: 'link', url: finalUrl, source: hostOf(finalUrl), title: '', blocks };
+    }
+    if (!window.Readability) await loadScript('vendor/readability.js');
+    const doc = new DOMParser().parseFromString(data.html, 'text/html');
+    const base = doc.createElement('base'); base.href = finalUrl; doc.head.appendChild(base);
+    const lang = ttsLang(doc.documentElement.getAttribute('lang'));
+    const art = new window.Readability(doc, { charThreshold: 300 }).parse();
+    if (!art || !art.content) throw new Error('Auf dieser Seite wurde kein Artikel gefunden.');
+    const box = new DOMParser().parseFromString(`<div>${art.content}</div>`, 'text/html').body.firstChild;
+    const blocks = blocksFromDom(box, lang);
+    if (!blocks.length) throw new Error('Auf dieser Seite wurde kein Artikel gefunden.');
+    // Überschrift des Artikels nicht doppelt vorlesen, dafür vorne als Titel
+    const title = (art.title || '').trim();
+    if (title && blocks[0] && blocks[0].text.trim() === title) blocks.shift();
+    if (title) blocks.unshift({ text: title, heading: true, lang });
+    return { kind: 'link', url: finalUrl, source: (art.siteName || hostOf(finalUrl)).trim(), title, author: (art.byline || '').trim(), blocks, lang };
+  }
+  function leafFrom(item) {
+    const book = E.fromBlocks(item.title, item.blocks, { author: item.author, lang: item.lang });
+    book.id = (item.kind === 'text' ? 't' : item.kind === 'pdf' ? 'p' : 'l') + hash((item.url || '') + '|' + book.title + '|' + book.totalChars).toString(36);
+    Object.assign(book, { kind: item.kind, source: item.source || LEAF_KINDS[item.kind], url: item.url || null, printPages: null, addedAt: new Date().toISOString() });
+    return book;
+  }
+  async function saveLeaf(book) {
+    const existing = await dbGet('books', book.id);
+    if (existing) { if (existing.archived) { existing.archived = false; await dbPut('books', existing); } return existing; }
+    await dbPut('books', book);
+    await dbPut('progress', { id: book.id, pos: 0, last: null, lastAt: null });
+    return book;
+  }
+  // Hinzufügen: E-Book, PDF, Link, Text
+  async function addSheet() {
+    const tile = (v, icon, l, d) => `<button class="add-opt" data-v="${v}"><span class="add-ic">${icon}</span><b>${l}</b><span class="small">${d}</span></button>`;
+    const res = await sheet(`<h2 class="label">Hinzufügen</h2><p class="add-q">Was soll vorgelesen werden?</p>
+      <div class="add-grid">${tile('epub', I.shelf, 'E-Book', 'EPUB aus deinen Dateien')}${tile('pdf', I.pdf, 'PDF', 'Text aus PDFs, mit Seitenzahlen')}${tile('link', I.link, 'Link', 'Artikel ohne Werbung & Banner')}${tile('text', I.txt, 'Text', 'Einfügen aus der Zwischenablage')}</div>`);
+    if (res === 'epub') return pickFile();
+    if (res === 'pdf') return pickPdf();
+    if (res === 'link') return linkSheet();
+    if (res === 'text') return textSheet();
+  }
+  async function pasteInto(el) {
+    try { const t = await navigator.clipboard.readText(); if (t) { el.value = t; el.dispatchEvent(new Event('input')); } else toast('Die Zwischenablage ist leer.'); }
+    catch (e) { toast('Kein Zugriff auf die Zwischenablage – halte ins Feld gedrückt und wähle „Einfügen“.'); }
+  }
+  function lastSheet() { const all = document.querySelectorAll('.overlay .sheet'); return all[all.length - 1]; }
+  async function linkSheet(prefill) {
+    const p = sheet(`<h2 class="label">Link</h2><p class="add-q">Welchen Artikel soll ich holen?</p>
+      <div class="add-field"><input id="linkin" type="url" inputmode="url" autocomplete="off" placeholder="https://…" aria-label="Link" value="${esc(prefill || '')}"><button class="btn solid" data-v="ok">Holen</button></div>
+      <button class="paste-chip" data-paste="#linkin">${I.clip} Aus Zwischenablage einfügen</button>`);
+    const sh = lastSheet(), inp = sh.querySelector('#linkin');
+    sh.querySelector('[data-paste]').addEventListener('click', () => pasteInto(inp));
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') sh.querySelector('[data-v="ok"]').click(); });
+    setTimeout(() => inp.focus(), 250);
+    const res = await p;
+    const url = inp.value.trim();
+    if (res !== 'ok' || !url) return;
+    const m = url.match(/https?:\/\/\S+/);
+    state.incoming = state.lastIncoming = { kind: 'link', url: m ? m[0] : url };
+    state.pending = null;
+    go('#/new');
+  }
+  async function textSheet() {
+    const p = sheet(`<h2 class="label">Text</h2><p class="add-q">Was soll vorgelesen werden?</p>
+      <input id="txttitle" class="add-title" type="text" placeholder="Titel (optional)" aria-label="Titel">
+      <textarea id="txtin" rows="7" placeholder="Text hier einfügen …" aria-label="Text"></textarea>
+      <div class="row" style="gap:8px"><button class="paste-chip" data-paste="#txtin">${I.clip} Aus Zwischenablage</button><span class="grow"></span><button class="btn solid" data-v="ok">Übernehmen</button></div>`);
+    const sh = lastSheet(), inp = sh.querySelector('#txtin'), tin = sh.querySelector('#txttitle');
+    sh.querySelector('[data-paste]').addEventListener('click', () => pasteInto(inp));
+    const res = await p;
+    const text = inp.value.trim();
+    if (res !== 'ok' || !text) return;
+    state.incoming = state.lastIncoming = { kind: 'text', text, title: tin.value.trim() };
+    state.pending = null;
+    go('#/new');
+  }
+  // Vorschau vor dem Speichern (auch Ziel für „Teilen“ aus anderen Apps)
+  route(/^\/new$/, async () => {
+    const inc = state.incoming;
+    if (!state.pending && !inc) return go('#/', true);
+    if (!state.pending) {
+      app.innerHTML = `<div class="screen newleaf"><span class="share-from">${inc.shared ? `${I.shareIn} Geteilt` : `${LEAF_KINDS[inc.kind]}`}</span>
+        <div class="leaf-loading"><div class="spinner"></div><span>${inc.kind === 'link' ? 'Hole den Artikel …' : 'Bereite den Text vor …'}</span><span class="small">${esc(inc.url || '')}</span></div></div>`;
+      try {
+        const item = inc.kind === 'link' ? await fetchArticle(inc.url)
+          : { kind: 'text', title: inc.title || '', blocks: blocksFromText(inc.text), source: 'Text' };
+        if (inc.kind === 'link' && inc.title && !item.title) item.title = inc.title;
+        const book = leafFrom(item);
+        if (!book.sentences.length) throw new Error('Darin wurde kein Text gefunden.');
+        state.pending = { book, shared: !!inc.shared };
+      } catch (e) {
+        if (location.hash !== '#/new') return;
+        app.innerHTML = `<div class="screen newleaf"><span class="share-from">${LEAF_KINDS[inc.kind]}</span>
+          <div class="card"><b>Das hat nicht geklappt.</b><span class="muted">${esc(e.message || 'Unbekannter Fehler')}</span>
+          ${inc.kind === 'link' && inc.url ? `<span class="small">${esc(inc.url)}</span>` : ''}</div>
+          <div class="col" style="gap:10px"><button class="btn solid big" data-act="new-retry">Nochmal versuchen</button><button class="btn big" data-act="new-cancel">Abbrechen</button></div>
+          ${e.code === 'pdf' ? '<p class="muted">Lade das PDF herunter und füge es über „Hinzufügen → PDF“ hinzu.</p>' : ''}</div>`;
+        return;
+      }
+      state.incoming = null;
+      if (location.hash !== '#/new') return;
+    }
+    const { book, shared } = state.pending;
+    const words = leafWords(book);
+    const preview = book.sentences.filter((s) => !s.h).slice(0, 3).map(T).join(' ').slice(0, 260);
+    app.innerHTML = `<div class="screen newleaf">
+      <span class="share-from">${shared ? `${I.shareIn} Geteilt` : `${LEAF_KINDS[book.kind]} hinzufügen`}</span>
+      <span class="label accent">${book.kind === 'link' ? 'Artikel gefunden' : book.kind === 'pdf' ? 'PDF gelesen' : 'Text übernommen'}</span>
+      <div class="leaf-card k-${book.kind}">
+        <span class="small">${esc(book.source || '')}${book.author ? ' · ' + esc(book.author.slice(0, 40)) : ''}</span>
+        <h1>${esc(book.title)}</h1>
+        <p class="leaf-prev">${esc(preview)}${preview.length >= 260 ? ' …' : ''}</p>
+        <div class="row wrap" style="gap:8px"><span class="pill dark">≈ ${leafMinutes(book)} min Hören</span><span class="pill">${words.toLocaleString('de-DE')} Wörter</span>${book.kind === 'link' ? '<span class="pill">Werbung entfernt</span>' : ''}${book.pageMarks ? `<span class="pill">${book.pageMarks[book.pageMarks.length - 1].l} Seiten</span>` : ''}</div>
+      </div>
+      <div class="col" style="gap:10px">
+        <button class="btn solid big" data-act="new-play">${I.playS} Jetzt vorlesen</button>
+        <button class="btn big" data-act="new-later">Für später ins Regal</button>
+        <button class="btn link" data-act="new-read">oder erst selbst lesen</button>
+      </div></div>`;
+  });
+  async function newAction(kind) {
+    if (kind === 'cancel') { state.pending = null; state.incoming = null; return go('#/', true); }
+    if (kind === 'retry') { state.incoming = state.lastIncoming; state.pending = null; return render(); }
+    const pend = state.pending;
+    if (!pend) return go('#/', true);
+    const book = await saveLeaf(pend.book);
+    state.pending = null;
+    state.book = null;
+    if (kind === 'later') { toast('Liegt jetzt bei „Lose Blätter“'); return go('#/', true); }
+    await loadBook(book.id);
+    if (kind === 'read') return go('#/read', true);
+    return beginSession(state.progress.pos);
+  }
+  // Archivieren per Wisch nach links
+  function bindLeafSwipes() {
+    document.querySelectorAll('.leaf[data-id]').forEach((el) => {
+      let x0 = null, y0 = 0, dx = 0, lock = null;
+      el.addEventListener('touchstart', (e) => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; dx = 0; lock = null; el.style.transition = 'none'; }, { passive: true });
+      el.addEventListener('touchmove', (e) => {
+        if (x0 == null) return;
+        const mx = e.touches[0].clientX - x0, my = e.touches[0].clientY - y0;
+        if (lock == null && Math.hypot(mx, my) > 8) lock = Math.abs(mx) > Math.abs(my) ? 'x' : 'y';
+        if (lock !== 'x') return;
+        dx = Math.min(0, mx);
+        el.style.transform = `translateX(${dx}px)`;
+        el.classList.toggle('arm', dx < -110);
+      }, { passive: true });
+      el.addEventListener('touchend', async () => {
+        if (x0 == null) return;
+        x0 = null;
+        el.style.transition = '';
+        if (lock === 'x') el.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); }, { capture: true, once: true });
+        if (dx < -110) {
+          el.style.transform = 'translateX(-110%)'; el.style.opacity = '0';
+          await setArchived(el.dataset.id, true);
+          setTimeout(render, 220);
+          toast('Archiviert – unten bei „Archiv“ holst du es zurück');
+        } else { el.style.transform = ''; el.classList.remove('arm'); }
+      });
+    });
+  }
+  async function setArchived(id, on) {
+    const b = await dbGet('books', id);
+    if (!b) return;
+    b.archived = on;
+    await dbPut('books', b);
+  }
+  function leafCard(b, prog, archived) {
+    const p = prog[b.id];
+    const pct = p && p.lastAt ? E.percentOf(b, p.pos) : 0;
+    return `<div class="leaf${archived ? ' archived' : ''}" data-id="${esc(b.id)}">
+      <button class="leaf-main" data-act="open" data-id="${esc(b.id)}" aria-label="${esc(b.title)} öffnen">
+        <span class="leaf-tile k-${b.kind}">${I[b.kind === 'link' ? 'link' : b.kind === 'pdf' ? 'pdf' : 'txt']}<span>${esc(b.title.slice(0, 34))}</span></span>
+        <span class="col grow" style="gap:3px;min-width:0"><b class="leaf-t">${esc(b.title)}</b><span class="small">${esc(b.source || LEAF_KINDS[b.kind])} · ${leafMeta(b)}</span>
+          <span class="leaf-bar" role="img" aria-label="Fortschritt ${pct} Prozent"><i style="width:${pct}%"></i></span></span>
+      </button>
+      ${archived ? `<button class="btn" data-act="unarchive" data-id="${esc(b.id)}">Zurückholen</button>` : `<button class="leaf-play" data-act="play-book" data-id="${esc(b.id)}" aria-label="${esc(b.title)} vorlesen">${I.playS}</button>`}
+    </div>`;
+  }
+  // Teilen aus anderen Apps (Android-Teilen-Menü → ./?title=…&text=…&url=…)
+  (function shareFromApps() {
+    const q = new URLSearchParams(location.search);
+    if (!q.has('text') && !q.has('url') && !q.has('title')) return;
+    const text = q.get('text') || '', title = q.get('title') || '';
+    const url = q.get('url') || ((text.match(/https?:\/\/\S+/) || [])[0] || '');
+    const rest = text.replace(url, '').trim();
+    state.incoming = url && rest.length < 400 ? { kind: 'link', url, title, shared: true } : { kind: 'text', text: text || title, title: rest === text ? title : '', shared: true };
+    state.lastIncoming = state.incoming;
+    history.replaceState(null, '', location.pathname + '#/new');
+  })();
+
+  // ---------- PDF: Text herausziehen ----------
+  function pickPdf() {
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = '.pdf,application/pdf';
+    inp.onchange = () => inp.files[0] && importPdf(inp.files[0]);
+    inp.click();
+  }
+  // Textstücke einer Seite zu Zeilen zusammensetzen
+  function pdfLines(items) {
+    const lines = [];
+    let cur = null;
+    for (const it of items) {
+      if (!it || typeof it.str !== 'string') continue;
+      if (!it.str.trim()) { if (cur && it.str && !/\s$/.test(cur.text)) cur.text += ' '; if (it.hasEOL) cur = null; continue; }
+      const x = it.transform[4], y = it.transform[5], h = Math.abs(it.transform[3]) || it.height || 10;
+      if (it.str.trim() && (!cur || Math.abs(y - cur.y) > h * 0.5)) { cur = { y, x, x1: x, h, text: '' }; lines.push(cur); }
+      if (!cur) continue;
+      if (cur.text && it.str && !/\s$/.test(cur.text) && !/^\s/.test(it.str) && x - cur.x1 > h * 0.15) cur.text += ' ';
+      cur.text += it.str;
+      cur.x1 = Math.max(cur.x1, x + (it.width || 0));
+      cur.x = Math.min(cur.x, x);
+      cur.h = Math.max(cur.h, h);
+      if (it.hasEOL) cur = null;
+    }
+    return lines.filter((l) => l.text.trim()).map((l) => ({ ...l, text: l.text.replace(/\s+/g, ' ').trim() }));
+  }
+  const median = (a) => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+  // Zeilen aller Seiten zu Absätzen: Kopf-/Fußzeilen und Seitenzahlen raus, Trennstriche zusammenfügen
+  function pdfBlocks(pages) {
+    const key = (t) => t.toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ').trim();
+    const edgeCount = new Map();
+    const edges = (p) => [...p.lines.slice(0, 2), ...p.lines.slice(-2)];
+    for (const p of pages) for (const k of new Set(edges(p).map((l) => key(l.text)))) edgeCount.set(k, (edgeCount.get(k) || 0) + 1);
+    const minRep = Math.max(2, Math.ceil(pages.length * 0.4));
+    const isPageNo = (t) => /^[-–—\s]*(seite\s*)?(\d{1,4}|[ivxlc]{1,7})(\s*(\/|von|of)\s*\d{1,4})?[-–—\s]*$/i.test(t);
+    const allH = median(pages.flatMap((p) => p.lines.map((l) => l.h)));
+    const lineGaps = (ls) => ls.slice(1).map((l, i) => ls[i].y - l.y).filter((g) => g > 0 && g < allH * 4);
+    // übliche Zeilenhöhe = unteres Viertel der Abstände (Absatzlücken und Kopfzeilen zählen nicht)
+    const q25 = (a) => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 4)]; };
+    const allGap = q25(pages.flatMap((p) => lineGaps(p.lines))) || allH * 1.3;
+    const blocks = [];
+    let open = null; // Absatz, der über die Seitengrenze läuft
+    const join = (a, b) => {
+      if (/[A-Za-zÄÖÜäöüß]-$/.test(a) && /^[a-zäöüß]/.test(b) && !/^(und|oder|bzw|sowie)\b/.test(b)) return a.slice(0, -1) + b;
+      return a + ' ' + b;
+    };
+    for (const p of pages) {
+      const n = p.lines.length;
+      const lines = p.lines.filter((l, i) => {
+        const edge = i < 2 || i >= n - 2;
+        if (!edge) return true;
+        if (isPageNo(l.text)) return false;
+        return (edgeCount.get(key(l.text)) || 0) < minRep || pages.length < 3;
+      });
+      if (!lines.length) continue;
+      const gaps = lineGaps(lines);
+      const gap = gaps.length >= 8 ? q25(gaps) : allGap;
+      const maxW = Math.max(...lines.map((l) => l.x1 - l.x));
+      const leftX = median(lines.map((l) => l.x));
+      let para = open;
+      open = null;
+      const flush = () => { if (para && para.text.trim()) blocks.push(para); para = null; };
+      lines.forEach((l, i) => {
+        const prev = lines[i - 1];
+        const heading = l.h > allH * 1.25 && l.text.length < 120;
+        let brk = !para;
+        if (prev && !brk) {
+          const g = prev.y - l.y;
+          const prevShort = prev.x1 - prev.x < maxW * 0.8 && /[.!?:"“”»«)]$/.test(prev.text);
+          const indent = l.x > leftX + allH * 0.8 && /[.!?:"“”»«)]$/.test(prev.text);
+          brk = g > gap * 1.45 || g < 0 || prevShort || indent || /^[•▪◦–-]\s/.test(l.text) || heading || !!para.heading;
+        }
+        if (brk) { flush(); para = { text: l.text, page: p.label, heading }; }
+        else para.text = join(para.text, l.text);
+      });
+      // Absatz ohne Satzende am Seitenende: auf der nächsten Seite weiterführen
+      if (para && !para.heading && !/[.!?:"“”»«)]$/.test(para.text)) open = para;
+      else flush();
+    }
+    if (open) blocks.push(open);
+    return blocks;
+  }
+  async function importPdf(file) {
+    const done = busy('Lese PDF …');
+    try {
+      const pdfjs = await import(new URL('vendor/pdf.min.js', location.href).href);
+      pdfjs.GlobalWorkerOptions.workerSrc = new URL('vendor/pdf.worker.min.js', location.href).href;
+      const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()), isEvalSupported: false }).promise;
+      let labels = null;
+      try { labels = await pdf.getPageLabels(); } catch (e) {}
+      const pages = [];
+      for (let n = 1; n <= pdf.numPages; n++) {
+        const page = await pdf.getPage(n);
+        const tc = await page.getTextContent();
+        pages.push({ lines: pdfLines(tc.items), label: (labels && labels[n - 1]) || String(n) });
+        page.cleanup();
+      }
+      let title = '';
+      try { const md = await pdf.getMetadata(); title = ((md && md.info && md.info.Title) || '').trim(); } catch (e) {}
+      if (!title || /^(untitled|microsoft word|dokument|document)/i.test(title)) title = file.name.replace(/\.pdf$/i, '').replace(/[_]+/g, ' ');
+      const blocks = pdfBlocks(pages);
+      pdf.destroy();
+      done();
+      if (!blocks.length) throw new Error('In diesem PDF steht kein auslesbarer Text – vermutlich ist es eingescannt.');
+      const book = leafFrom({ kind: 'pdf', title, blocks, source: 'PDF' });
+      state.pending = { book, shared: false };
+      state.incoming = null;
+      go('#/new');
+    } catch (e) {
+      done();
+      toast(e.message || 'Das PDF konnte nicht gelesen werden.');
+    }
+  }
 
   // ---------------- Import ----------------
   function pickFile() {
@@ -1980,7 +2351,14 @@
     const act = el.dataset.act;
     const book = state.book;
     switch (act) {
-      case 'add': return pickFile();
+      case 'add': return addSheet();
+      case 'new-play': return newAction('play');
+      case 'new-later': return newAction('later');
+      case 'new-read': return newAction('read');
+      case 'new-retry': return newAction('retry');
+      case 'new-cancel': return newAction('cancel');
+      case 'unarchive': await setArchived(el.dataset.id, false); toast('Zurück im Regal'); return render();
+      case 'toggle-archive': state.showArchive = !state.showArchive; return render();
       case 'settings': return go('#/settings');
       case 'open': state.book = null; return go('#/book/' + el.dataset.id);
       case 'timer': S.timer = el.dataset.v === 'sec' ? 'sec' : parseInt(el.dataset.v, 10); saveSettings(); return render();

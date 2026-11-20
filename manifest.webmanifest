@@ -1,7 +1,7 @@
 {
   "name": "Wort. Laut.",
   "short_name": "Wort. Laut.",
-  "description": "Eigene EPUBs mit natürlicher Stimme vorlesen lassen",
+  "description": "E-Books, PDFs, Artikel und Texte mit natürlicher Stimme vorlesen lassen",
   "start_url": "./#/",
   "scope": "./",
   "display": "standalone",
@@ -33,5 +33,15 @@
       "type": "image/svg+xml",
       "purpose": "any"
     }
-  ]
+  ],
+  "share_target": {
+    "action": "./",
+    "method": "GET",
+    "enctype": "application/x-www-form-urlencoded",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  }
 }

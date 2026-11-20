@@ -512,7 +512,37 @@
     return hits;
   }
 
-  const api = { parseEpub, splitSentences, sentenceText, pageOf, indexForPage, indexForOffset, percentOf, norm, buildIndex, search };
+  // Lose Blätter (Text, Artikel, PDF): aus Absätzen ein buchartiges Objekt bauen.
+  // blocks: [{ text, heading?, lang?, page? }]
+  function fromBlocks(title, blocks, opts) {
+    opts = opts || {};
+    const sentences = [];
+    const pageMarks = [];
+    let offset = 0;
+    for (const b of blocks) {
+      const text = String(b.text || '').replace(/\s+/g, ' ').trim();
+      if (!text) continue;
+      const first = sentences.length;
+      for (const [st, en] of splitSentences(text)) {
+        const t = text.slice(st, en).trim();
+        if (!t) continue;
+        sentences.push({ p: [[t, b.lang || opts.lang || null]], s: 0, o: offset, h: b.heading ? 1 : 0 });
+        offset += t.length + 1;
+      }
+      if (sentences.length > first) {
+        sentences[sentences.length - 1].pe = 1;
+        if (b.page != null && (!pageMarks.length || pageMarks[pageMarks.length - 1].l !== String(b.page))) pageMarks.push({ i: first, l: String(b.page) });
+      }
+    }
+    const t = String(title || '').trim() || (sentences[0] ? sentenceText(sentences[0]).slice(0, 60) : 'Ohne Titel');
+    return {
+      title: t, author: opts.author || '', cover: null,
+      sections: [{ title: t.slice(0, 80), doc: '', part: 1, start: 0, chars: offset }],
+      sentences, totalChars: offset, startAt: 0, pageMarks: pageMarks.length ? pageMarks : null,
+    };
+  }
+
+  const api = { fromBlocks, parseEpub, splitSentences, sentenceText, pageOf, indexForPage, indexForOffset, percentOf, norm, buildIndex, search };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.HBEpub = api;
 })(typeof self !== 'undefined' ? self : this);
